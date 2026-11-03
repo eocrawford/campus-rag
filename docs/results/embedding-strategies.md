@@ -1,6 +1,6 @@
 # Embedding strategy results
 
-Generated on 2026-11-03 at commit `9f0a8c8+uncommitted`. The corpus has 247 documents and 1,978 chunks. The golden set has 47 questions; the 36 standalone answerable ones are scored here, and each variant retrieves the top 10 chunks by exact cosine search. Hybrid search fuses the variant's top 50 vector results with the production BM25 keyword results by reciprocal rank fusion. See [decision 15](../plans/mvp-design.md#15-embedding-strategy-experiment) for the design and the [retrieval runbook](../../runbooks/evaluate-retrieval.md#compare-embedding-strategies) to repeat the run.
+Generated on 2026-11-03 at commit `05ad702`. The corpus has 247 documents and 1,978 chunks. The golden set has 47 questions; the 36 standalone answerable ones are scored here, and each variant retrieves the top 10 chunks by exact cosine search. Hybrid search fuses the variant's top 50 vector results with the production BM25 keyword results by reciprocal rank fusion. See [decision 15](../plans/mvp-design.md#15-embedding-strategy-experiment) for the design and the [retrieval runbook](../../runbooks/evaluate-retrieval.md#compare-embedding-strategies) to repeat the run.
 
 ## How much to trust the differences
 
@@ -76,11 +76,11 @@ Corpus embedding time is the time in embedding requests on this CPU, in batches 
 
 | Variant | Corpus embedding time | Median query embedding ms |
 |---|---|---|
-| `baseline` | production vectors reused | 40 |
-| `no-heading` | 512 s (8.5 min) | 36 |
-| `no-task-prefix` | 530 s (8.8 min) | 36 |
-| `bge-m3` | 1220 s (20.3 min) | 79 |
-| `nomic-256` | 1.6 s, derived with no model calls | 40 |
+| `baseline` | production vectors reused | 38 |
+| `no-heading` | 512 s (8.5 min) | 38 |
+| `no-task-prefix` | 530 s (8.8 min) | 32 |
+| `bge-m3` | 1220 s (20.3 min) | 73 |
+| `nomic-256` | 1.6 s, derived with no model calls | 37 |
 
 ## What this shows
 

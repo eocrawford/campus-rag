@@ -450,3 +450,13 @@ rather than published benchmarks.
 
 With 36 answerable standalone questions, one question moves recall by about 0.03, so differences
 under 0.06 are not meaningful. The report states this.
+
+### 15d. Result
+
+[Results](../results/embedding-strategies.md): the task prefixes are the only choice whose effect
+exceeds the noise threshold. Without them, vector recall@1 falls from 0.86 to 0.72 and MRR@10 from
+0.91 to 0.84. Removing the heading prefix, switching to `bge-m3`, or truncating to 256 dimensions
+changes results by one question or less; `bge-m3` takes 2.4 times as long to embed the corpus.
+Hybrid search hides every difference (recall@1 0.69 and recall@5 0.97-1.00 for all variants).
+Production keeps `nomic-embed-text` at 768 dimensions with prefixes. `nomic-256` is a measured
+option if storage ever matters: one third of the vector size with no measurable loss here.
