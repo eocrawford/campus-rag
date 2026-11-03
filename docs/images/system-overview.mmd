@@ -1,0 +1,61 @@
+flowchart TB
+    subgraph offline["Offline indexing: python -m campus_rag.ingest"]
+        direction LR
+        sources["config/sources.toml"] --> select["Select sitemap URLs"]
+        select --> fetch["Fetch politely<br/>robots.txt, 1 req/s"]
+        fetch -.-> raw[("data/raw<br/>page cache")]:::store
+        fetch --> extract["Extract main text"]
+        extract --> chunk["Chunk by headings<br/>about 400 tokens"]
+        chunk --> embed["Embed chunks<br/>nomic-embed-text"]:::embed
+    end
+
+    subgraph evaluation["Evaluation"]
+        direction LR
+        golden[("Golden set<br/>47 questions")]:::store --> reteval["Retrieval eval<br/>recall@k, MRR"]
+        golden --> anseval["Answer eval<br/>llama3.1:8b judge"]:::llm
+    end
+
+    db[("PostgreSQL 17 + pgvector<br/>documents, chunks, embeddings")]:::store
+
+    subgraph interfaces["Interfaces"]
+        direction LR
+        person("Person"):::iface --> cli("CLI: ask, retrieve"):::iface
+        person --> api("HTTP API :8000"):::iface
+        agent("AI agent"):::iface --> mcp("MCP server, stdio"):::iface
+    end
+
+    subgraph online["Online answering"]
+        direction LR
+        rewrite["Rewrite follow-ups<br/>qwen2.5:3b-instruct"]:::llm --> search["Hybrid search<br/>BM25 + vector, RRF"]
+        search --> generate["Generate cited answer<br/>qwen2.5:7b-instruct"]:::llm
+        generate --> check["Validate citations<br/>or refuse"]
+    end
+
+    tickets("Mock ticketing :8001"):::iface
+    logs[("request_log,<br/>answer_feedback")]:::store
+    report["Usage report"]
+
+    offline -->|chunks, vectors| db
+    db --> online
+    interfaces -->|search, answer| online
+    interfaces -->|draft_ticket| tickets
+    interfaces -->|API and MCP| logs
+    logs --> report
+    evaluation -.->|measures| online
+    online ~~~ legend
+
+    subgraph legend["Legend"]
+        direction LR
+        legendCode["Deterministic code"]
+        legendLlm["LLM call, Ollama"]:::llm
+        legendEmbed["Embedding model, Ollama"]:::embed
+        legendStore[("Data store")]:::store
+        legendIface("Interface or actor"):::iface
+        legendCode ~~~ legendLlm ~~~ legendEmbed ~~~ legendStore ~~~ legendIface
+    end
+
+    classDef default fill:#ffffff,stroke:#475569,color:#0f172a
+    classDef llm fill:#ffedd5,stroke:#c2410c,color:#431407
+    classDef embed fill:#dbeafe,stroke:#1d4ed8,color:#172554
+    classDef store fill:#dcfce7,stroke:#15803d,color:#052e16
+    classDef iface fill:#f3e8ff,stroke:#7e22ce,color:#3b0764

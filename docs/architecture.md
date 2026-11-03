@@ -18,17 +18,149 @@ Ingestion, the index, retrieval, grounded answers, and the HTTP and MCP interfac
 
 ## Components
 
-```text
-                 +-----------------------------  offline  ------------------------------+
-Allowed sources -> fetch -> extract text -> chunk -> embed -> PostgreSQL (pgvector + FTS)
-                 +-----------------------------------------------------------------------+
+Two diagrams show how the parts fit. White boxes and diamonds are deterministic code, orange boxes
+are LLM calls, blue boxes are embedding-model calls, purple boxes are people, interfaces, and
+services, and cylinders are data stores. PostgreSQL and the Ollama model server run in Docker
+Compose on this machine, so no text leaves it.
 
-                 +-----------------------------  online  -------------------------------+
-Question -> query rewrite -> keyword search ---+
-                          -> vector search  ---+-> RRF fusion -> rerank -> prompt -> LLM
-                                                                     |
-                                       answer + citations <- citation check
-                 +-----------------------------------------------------------------------+
+<!-- Each mermaid fence below is a copy of its source in docs/images/*.mmd and must match it
+exactly. After an edit, update both and re-render the .svg and .png beside the source with
+@mermaid-js/mermaid-cli. -->
+
+### System overview
+
+Offline, `python -m campus_rag.ingest` turns the configured policy pages into chunks and
+embeddings in PostgreSQL. Online, the CLI and the HTTP API answer questions from those chunks, and
+the MCP server lets an AI agent search them. The evaluation harness measures search and answers
+against the golden set. Rendered copies: [PNG](images/system-overview.png),
+[SVG](images/system-overview.svg).
+
+```mermaid
+flowchart TB
+    subgraph offline["Offline indexing: python -m campus_rag.ingest"]
+        direction LR
+        sources["config/sources.toml"] --> select["Select sitemap URLs"]
+        select --> fetch["Fetch politely<br/>robots.txt, 1 req/s"]
+        fetch -.-> raw[("data/raw<br/>page cache")]:::store
+        fetch --> extract["Extract main text"]
+        extract --> chunk["Chunk by headings<br/>about 400 tokens"]
+        chunk --> embed["Embed chunks<br/>nomic-embed-text"]:::embed
+    end
+
+    subgraph evaluation["Evaluation"]
+        direction LR
+        golden[("Golden set<br/>47 questions")]:::store --> reteval["Retrieval eval<br/>recall@k, MRR"]
+        golden --> anseval["Answer eval<br/>llama3.1:8b judge"]:::llm
+    end
+
+    db[("PostgreSQL 17 + pgvector<br/>documents, chunks, embeddings")]:::store
+
+    subgraph interfaces["Interfaces"]
+        direction LR
+        person("Person"):::iface --> cli("CLI: ask, retrieve"):::iface
+        person --> api("HTTP API :8000"):::iface
+        agent("AI agent"):::iface --> mcp("MCP server, stdio"):::iface
+    end
+
+    subgraph online["Online answering"]
+        direction LR
+        rewrite["Rewrite follow-ups<br/>qwen2.5:3b-instruct"]:::llm --> search["Hybrid search<br/>BM25 + vector, RRF"]
+        search --> generate["Generate cited answer<br/>qwen2.5:7b-instruct"]:::llm
+        generate --> check["Validate citations<br/>or refuse"]
+    end
+
+    tickets("Mock ticketing :8001"):::iface
+    logs[("request_log,<br/>answer_feedback")]:::store
+    report["Usage report"]
+
+    offline -->|chunks, vectors| db
+    db --> online
+    interfaces -->|search, answer| online
+    interfaces -->|draft_ticket| tickets
+    interfaces -->|API and MCP| logs
+    logs --> report
+    evaluation -.->|measures| online
+    online ~~~ legend
+
+    subgraph legend["Legend"]
+        direction LR
+        legendCode["Deterministic code"]
+        legendLlm["LLM call, Ollama"]:::llm
+        legendEmbed["Embedding model, Ollama"]:::embed
+        legendStore[("Data store")]:::store
+        legendIface("Interface or actor"):::iface
+        legendCode ~~~ legendLlm ~~~ legendEmbed ~~~ legendStore ~~~ legendIface
+    end
+
+    classDef default fill:#ffffff,stroke:#475569,color:#0f172a
+    classDef llm fill:#ffedd5,stroke:#c2410c,color:#431407
+    classDef embed fill:#dbeafe,stroke:#1d4ed8,color:#172554
+    classDef store fill:#dcfce7,stroke:#15803d,color:#052e16
+    classDef iface fill:#f3e8ff,stroke:#7e22ce,color:#3b0764
+```
+
+### Answering a question
+
+A follow-up question is first rewritten into a standalone query. Keyword and vector search run
+side by side, and their rankings are fused. The model answers from numbered passages, and code
+validates its citations. An answer with no valid citation becomes the fixed refusal sentence, and
+the API attaches a prefilled ticket draft that an agent can file with the MCP `draft_ticket` tool
+once the user agrees. Rendered copies: [PNG](images/answering-a-question.png),
+[SVG](images/answering-a-question.svg).
+
+```mermaid
+flowchart TB
+    question("Question + chat history"):::iface --> hasHistory{"Earlier turns?"}
+    hasHistory -->|no| query
+    hasHistory -->|yes| rewrite["Rewrite as standalone<br/>qwen2.5:3b-instruct"]:::llm
+    rewrite -->|"or question as typed"| query
+
+    subgraph hybrid["Hybrid search"]
+        direction TB
+        query["Search query"] --> keyword["BM25 keyword search<br/>top 50"]
+        query --> embedQuery["Embed query<br/>nomic-embed-text"]:::embed
+        embedQuery --> vector["Vector search<br/>HNSW cosine, top 50"]
+        tsv[("chunks.search_tsv<br/>GIN index")]:::store --> keyword
+        vectors[("chunk_embeddings<br/>HNSW index")]:::store --> vector
+        keyword --> fusion["RRF fusion, k = 60<br/>top 8 chunks"]
+        vector --> fusion
+    end
+
+    fusion --> anyPassages{"Any passages?"}
+    anyPassages -->|yes| prompt["Assemble prompt<br/>up to 6 passages<br/>3,000-token budget"]
+    prompt --> generate["Generate answer<br/>qwen2.5:7b-instruct"]:::llm
+    generate --> check["Validate citations<br/>drop unknown numbers"]
+    check --> cited{"Cited and<br/>not refused?"}
+    cited -->|yes| answer("Answer + sources"):::iface
+    cited -->|no| refusal("Fixed refusal sentence"):::iface
+    anyPassages -->|no| refusal
+    refusal --> draft["Prefill ticket draft<br/>from the question"]
+    draft -.->|user or agent agrees| filing
+
+    subgraph filing["File a ticket"]
+        direction LR
+        draftTool("MCP draft_ticket"):::iface --> ticketing("Mock ticketing :8001"):::iface
+        ticketing --> tickets[("mock_tickets")]:::store
+    end
+
+    subgraph legend["Legend"]
+        direction LR
+        legendCode["Deterministic code"]
+        legendDecision{"Code decision"}
+        legendLlm["LLM call, Ollama"]:::llm
+        legendEmbed["Embedding model, Ollama"]:::embed
+        legendStore[("Data store")]:::store
+        legendIface("Input, output, or service"):::iface
+        legendCode ~~~ legendDecision ~~~ legendLlm ~~~ legendEmbed ~~~ legendStore ~~~ legendIface
+    end
+
+    filing ~~~ legend
+
+    classDef default fill:#ffffff,stroke:#475569,color:#0f172a
+    classDef llm fill:#ffedd5,stroke:#c2410c,color:#431407
+    classDef embed fill:#dbeafe,stroke:#1d4ed8,color:#172554
+    classDef store fill:#dcfce7,stroke:#15803d,color:#052e16
+    classDef iface fill:#f3e8ff,stroke:#7e22ce,color:#3b0764
 ```
 
 ### Ingestion

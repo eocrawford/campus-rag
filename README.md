@@ -10,6 +10,12 @@ the sources do not support one.
 > declines. An HTTP API, an MCP server, usage analytics, and a mock ticketing service work
 > locally; the evaluation write-up is in progress. See [the MVP plan](docs/plans/mvp.md).
 
+![System overview: offline indexing fetches, chunks, and embeds policy pages into PostgreSQL with pgvector; the CLI, HTTP API, and MCP server answer or search through hybrid search and local Ollama models, with citation validation, a mock ticketing service, usage logs, and an evaluation harness.](docs/images/system-overview.png)
+
+Offline indexing fills the PostgreSQL index that the CLI, HTTP API, and MCP server search, and a
+local LLM writes the cited answers; see [architecture](docs/architecture.md#components) for the
+legend and a step-by-step diagram of answering a question.
+
 ## Why
 
 University staff, faculty, and students spend time searching scattered policy pages and help
@@ -18,22 +24,23 @@ verify the answer instead of trusting the model.
 
 ## How it works
 
-```text
-Public documents -> chunk -> embed -> PostgreSQL + pgvector
-                                            |
-Question -> rewrite -> hybrid search (keyword + vector) -> rerank -> grounded answer with citations
-```
+Ingestion fetches and chunks public policy pages, embeds each chunk locally, and stores text and
+vectors in PostgreSQL with pgvector. A question is rewritten when it follows up on an earlier one,
+searched with BM25 keyword and vector search fused by reciprocal rank fusion, and answered by a
+local LLM that must cite the passages it uses; code removes invalid citations and returns a fixed
+refusal when nothing supports an answer.
 
 | Layer | Responsibility |
 |-------|----------------|
 | **Ingestion** | Fetch allowed public pages, extract text, chunk with overlap, embed locally, record source metadata. |
 | **Index** | Store chunks, embeddings, and metadata in PostgreSQL with pgvector and full-text search. |
-| **Retrieval** | Combine keyword and vector results with reciprocal rank fusion (RRF), then filter by metadata. |
+| **Retrieval** | Combine BM25 keyword and vector results with reciprocal rank fusion (RRF), with optional source and URL filters. |
 | **Generation** | Answer only from retrieved passages, cite each claim, and decline when evidence is missing. |
 | **Evaluation** | Measure retrieval recall and answer faithfulness against a golden question set. |
-| **API and tools** | Expose search and answer through a FastAPI service and a Model Context Protocol (MCP) tool. |
+| **API and tools** | Expose search and answer through a FastAPI service and an MCP server with `search_policies` and `draft_ticket` tools. |
+| **Analytics** | Log requests and answer ratings locally and summarize them in a usage report. |
 
-See [architecture](docs/architecture.md) for design details and tradeoffs.
+See [architecture](docs/architecture.md) for the diagrams, design details, and tradeoffs.
 
 ## Quick start
 
