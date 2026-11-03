@@ -10,4 +10,4 @@
 | Foundations: deterministic code versus LLM judgment, Python conventions | [`docs/agent-guidance/foundations.md`](agent-guidance/foundations.md) |
 | Prose authoring guidelines | [`docs/agent-guidance/prose-authoring-guidelines.md`](agent-guidance/prose-authoring-guidelines.md) |
 | MVP plan and milestones | [`docs/plans/mvp.md`](plans/mvp.md) |
-| MVP design decisions: provider, corpus, tooling, database access, layout, tests | [`docs/plans/mvp-design.md`](plans/mvp-design.md) |
+| MVP design decisions: model provider, corpus, tooling, database access, layout, tests, capability coverage, restricted-network installs, corpus pipeline, index and embeddings | [`docs/plans/mvp-design.md`](plans/mvp-design.md) |

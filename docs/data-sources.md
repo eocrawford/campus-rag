@@ -10,8 +10,8 @@ campus-rag ingests only public documents that are intended for general readers.
 - Never ingest pages that require sign-in, or any student, patient, or personnel records.
   The project must not process data covered by FERPA or HIPAA.
 - Keep the source URL and retrieval date with every chunk so answers can be verified.
-- Do not commit downloaded content. It lives under the ignored `data/` directory and can be
-  rebuilt from the allowlist.
+- Keep downloaded content out of Git. It lives under the ignored `data/` directory and the local
+  database, and can be rebuilt from the allowlist.
 
 ## Allowlist
 
@@ -29,9 +29,11 @@ reproducing, distributing, or displaying site content without permission, except
 such as fair use, and prohibit placing an unreasonable load on UW infrastructure. Therefore:
 
 - **Crawl politely.** Fetch from sitemaps, at most one request per second, with a descriptive user
-  agent that links to this repository. Re-fetch only changed pages.
+  agent that links to this repository. Send conditional requests when a site supports them. The
+  Policy Directory does not, so a full run downloads each selected page once (about 318 requests).
 - **Keep content local.** Downloaded pages, chunks, and embeddings stay in the ignored `data/`
-  directory and the local database. Never commit or publish them.
+  directory and the local database. Embeddings are computed by a model server on the same machine,
+  so no corpus text is sent to a hosted service. Never commit or publish this content.
 - **Write the golden set in original words.** Store each question, its source URL and section, and a
   reference answer written in our own words. Do not copy passages into the repository.
 - **Keep answers short and attributed.** Answers summarize and link to the source page rather than

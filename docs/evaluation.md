@@ -2,6 +2,8 @@
 
 Evaluation separates two questions: did retrieval find the right passages, and did the answer
 stay faithful to them? Measuring them separately shows where a failure comes from.
+The golden set arrives in M5, retrieval metrics in M6, and answer metrics in M8 of the
+[MVP plan](plans/mvp.md).
 
 ## Golden set
 
