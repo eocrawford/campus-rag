@@ -33,6 +33,8 @@ university documents with cited sources. This guide is for agents and humans mak
   `src/campus_rag/index/migrations/` as `NNN_snake_name.sql`; never edit a migration after it merges.
 * Tests go in `tests/`. Mark tests that need the local database with `@pytest.mark.db`.
 * Repository entry-point scripts go in `scripts/`.
+* Corpus selection rules go in `config/sources.toml`. Fetched pages are cached in the ignored
+  `data/raw/` directory.
 * Documentation goes in `docs/`. Update the table of contents in [`docs/AGENTS.md`](docs/AGENTS.md)
   when adding a topic.
 * Runbooks go in `runbooks/`. Update the table of contents in [`runbooks/AGENTS.md`](runbooks/AGENTS.md)

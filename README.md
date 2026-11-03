@@ -4,9 +4,10 @@ campus-rag answers questions about public university policy and IT documentation
 It retrieves relevant passages, grounds an LLM answer in those passages, and declines to answer when
 the sources do not support one.
 
-> **Status: early development.** The local environment (Python, PostgreSQL with pgvector, and
-> database migrations) is in place. Retrieval and answering features below describe the planned
-> design; see [the MVP plan](docs/plans/mvp.md) for progress.
+> **Status: early development.** The local environment and corpus ingestion are in place: 247 UW
+> policy documents are fetched politely, split into 1,978 heading-aware chunks, and stored in
+> PostgreSQL. Retrieval and answering features below describe the planned design; see
+> [the MVP plan](docs/plans/mvp.md) for progress.
 
 ## Why
 
@@ -52,6 +53,7 @@ and troubleshooting.
 |------|----------|
 | `src/` | Application source code (`campus_rag` package). |
 | `tests/` | Unit tests and database tests. |
+| `config/` | Corpus selection rules (URLs and filters only; fetched content is never committed). |
 | `scripts/` | Repository entry-point scripts for ingestion, evaluation, and local setup. |
 | `docs/` | Architecture, evaluation, data-source policy, and contributor guidance. |
 | `runbooks/` | Repeatable operational procedures. |

@@ -34,13 +34,25 @@ Question -> query rewrite -> keyword search ---+
 
 ### Ingestion
 
-- Fetch only sources listed in [data sources](data-sources.md), honoring `robots.txt` and rate limits.
-- Extract main-body text and section headings; drop navigation and boilerplate.
-- Split text into chunks of roughly 300-800 tokens with overlap, preferring heading and paragraph
-  boundaries. Prefix each chunk with its document title and section heading so it remains
-  meaningful on its own.
-- Record metadata: source URL, title, section, retrieval date, and content hash. The hash makes
-  re-ingestion idempotent and skips unchanged chunks.
+`uv run python -m campus_rag.ingest` runs these stages; see [corpus ingestion](../runbooks/ingest-corpus.md).
+
+- **Select.** Read each configured sitemap and keep URLs matching the rules in
+  [`config/sources.toml`](../config/sources.toml). A sitemap that cannot be read stops the run
+  before anything is written.
+- **Fetch.** Check `robots.txt`, make at most one request per second with a descriptive user agent,
+  retry transient failures, and cache pages under the ignored `data/raw/` directory. Conditional
+  requests are sent when a site provides validators; the Policy Directory does not, so every run
+  re-downloads its pages and content hashes decide what changed.
+- **Extract.** Read the page's `<main>` element, keep the heading hierarchy, and drop the in-page
+  table of contents, scripts, and navigation-only blocks. Pages under the source's minimum word
+  count (section index pages) are skipped.
+- **Chunk.** Split at heading boundaries, then at paragraphs and sentences for long sections, aiming
+  for about 400 tokens with a hard maximum of 800 and about 50 tokens of overlap between split
+  pieces. Short sections merge into a neighbor so no chunk is a fragment. Each chunk starts with its
+  heading path so it stands on its own.
+- **Store.** Upsert each document and its chunks in one transaction. An unchanged document keeps
+  its chunks; a changed one has them replaced; on a full run, documents no longer selected are
+  removed. Failed pages never delete stored data.
 
 ### Index
 
