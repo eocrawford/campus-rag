@@ -15,6 +15,10 @@ options considered, the choice, and its status.
 | 8 | Installs on restricted networks | Opt-in `-PackageIndexUrl` mirror install with lock hashes enforced; `uv.lock` stays canonical; `uv_build` backend so rebuilds need no download | Decided 2026-11-03 |
 | 9 | M3 corpus pipeline | UW Policy Directory only; sitemap-driven selection; cached polite fetch; heading-aware extraction and chunking; documents and chunks in PostgreSQL; new `campus_rag.ingest` command | Decided 2026-11-03 |
 | 10 | M4 index: embeddings and keyword search | Local embeddings with Ollama (`nomic-embed-text`, 768 dimensions) in Docker Compose through an OpenAI-compatible client; per-model embeddings table with HNSW; weighted full-text index; embedding stage in `campus_rag.ingest` | Decided 2026-11-03 |
+| 11 | M5-M6 golden set and retrieval | Committed golden set with URL and heading targets; keyword (OR query, `ts_rank_cd`), vector (HNSW), and hybrid (RRF) search; no reranker | Decided 2026-11-03 (maintainer-delegated) |
+| 12 | M7-M8 answers and answer evaluation | `qwen2.5:7b-instruct` answers through Ollama; `qwen2.5:3b-instruct` rewrites follow-ups; deterministic citation checks and refusals; `llama3.1:8b` judges | Decided 2026-11-03 (maintainer-delegated) |
+| 13 | M9 interfaces | FastAPI on loopback (`/search`, `/answer`, `/health`); MCP server over stdio with a `search_policies` tool | Decided 2026-11-03 (maintainer-delegated) |
+| 14 | M11-M12 analytics and mock ticketing | Local request log and feedback tables with a usage report; a loopback mock ticketing API and an MCP `draft_ticket` tool | Decided 2026-11-03 (maintainer-delegated) |
 
 ## 1. Model provider
 
@@ -277,3 +281,104 @@ M6, where an exact scan provides the recall baseline.
 
 The chat model for grounded answers is decided in M7. Candidates are a local Ollama model (free,
 about 15-40 seconds per answer on this CPU) and the Gemini API free tier.
+
+## Maintainer-delegated decisions
+
+On 2026-11-03 the maintainer asked for milestones 5-12 to be built autonomously. Decisions 11-14
+were made under that delegation, including consent for the new commands they introduce, and are
+recorded here before implementation. Each is backed by the measurements cited.
+
+## 11. M5-M6 golden set and retrieval
+
+### 11a. Golden set
+
+- `eval/golden_set.jsonl`, one question per line: `id`, `question`, `type`
+  (`paraphrase`, `exact_term`, or `unanswerable`), `expected` (a list of `{url, heading_prefix}`
+  targets), `reference_answer`, and optional `follow_up_of` for multi-turn cases.
+- About 45 questions: roughly half paraphrased (few words shared with the source), a third exact-term
+  (policy numbers, titles, defined terms), and at least six unanswerable.
+- Questions and reference answers are written in original words; the file holds no copied policy
+  text (see [UW terms constraints](../data-sources.md#uw-terms-of-use-constraints)).
+- A retrieved chunk matches a target when its document URL equals the target URL and either
+  heading path is a prefix of the other. Targets use URLs and headings rather than chunk IDs, so
+  re-chunking does not invalidate the golden set.
+
+### 11b. Search
+
+- **Keyword:** the question's stemmed lexemes from `plainto_tsquery('english', ...)` joined with OR,
+  ranked by `ts_rank_cd` over the weighted `search_tsv`. AND matching (`websearch_to_tsquery`)
+  returned nothing for natural-language questions in M4 because every word must match.
+- **Vector:** cosine distance through the HNSW index with `hnsw.ef_search = 100`.
+- **Hybrid:** the top 50 of each list fused with reciprocal rank fusion, `k = 60`.
+- **Filters:** by source and URL prefix.
+- **Reranking:** not in the MVP. No local cross-encoder runs without adding PyTorch, and LLM
+  reranking costs about 40 seconds per query on this CPU.
+
+### 11c. Retrieval evaluation
+
+`uv run python -m campus_rag.evaluate retrieval` reports recall@1/3/5/10 and MRR@10 for each mode,
+overall and by question type, plus latency and HNSW recall against an exact scan. It writes raw
+results to the ignored `eval-results/` directory and, with `--write-report`, the committed summary
+`docs/results/retrieval.md`. `uv run python -m campus_rag.retrieve "<query>"` prints ranked results
+for manual inspection.
+
+## 12. M7-M8 answers and answer evaluation
+
+### 12a. Models
+
+Measured on this CPU (16 cores, no GPU) with five retrieved passages (about 1,200 prompt tokens):
+
+| Model | Seconds per answer | Cited passages | Refused unanswerable |
+|-------|--------------------|----------------|----------------------|
+| `qwen2.5:3b-instruct` | 19-22 | No | Yes |
+| `llama3.2:3b` | 12-27 | Invented its own format | Yes |
+| **`qwen2.5:7b-instruct`** | 46-53 | Yes | Yes |
+
+**Decision:** `qwen2.5:7b-instruct` writes answers at temperature 0. `qwen2.5:3b-instruct`
+rewrites follow-up questions into standalone queries, a short task where speed matters. The judge is
+`llama3.1:8b`, from a different model family so it does not grade its own family's output. All run
+locally in the Compose `ollama` service, whose context length is raised to 8,192 tokens so prompts
+are never silently truncated. Models are configuration (`CAMPUS_RAG_CHAT_*`).
+
+### 12b. Grounded answers
+
+- The prompt holds instructions, up to six numbered passages within a 3,000-token budget, ordered by
+  relevance, and the question.
+- The model must cite passage numbers for each claim, keep answers under 150 words, and reply with a
+  fixed refusal sentence when the passages lack the answer.
+- Code removes citations to passages that were not supplied. An answer left with no valid citation
+  becomes a refusal, so no uncited claim reaches the user.
+- `uv run python -m campus_rag.ask "<question>"` answers from the command line.
+
+### 12c. Answer evaluation
+
+`uv run python -m campus_rag.evaluate answers` answers every golden question and reports:
+
+| Metric | Method |
+|--------|--------|
+| Faithfulness | Judge splits the answer into claims and marks each supported or not by the cited passages; score = supported / total. |
+| Answer relevance | Judge rates 1-5 whether the answer addresses the question. |
+| Citation validity | Deterministic: share of cited numbers that were supplied. |
+| Correct refusal | Deterministic: unanswerable questions refused; answerable questions answered. |
+
+Raw results go to `eval-results/`; `--write-report` writes `docs/results/answers.md`.
+
+## 13. M9 interfaces
+
+- `uv run python -m campus_rag.api` serves FastAPI on `127.0.0.1:8000`: `POST /search`,
+  `POST /answer`, and `GET /health`, with OpenAPI docs at `/docs`. It binds to loopback only;
+  hosting a public service over UW content needs UW's permission.
+- `uv run python -m campus_rag.mcp_server` runs an MCP server over stdio with a `search_policies`
+  tool returning ranked passages with URLs and headings, so an agent decides when to retrieve.
+
+## 14. M11-M12 analytics and mock ticketing
+
+- **Analytics (M11):** migration `004` adds `request_log` (time, interface, question, mode,
+  latency, top retrieval scores, refused, citation count, models) and `answer_feedback` (rating +1 or
+  -1, optional comment). The API logs each request and accepts `POST /feedback`.
+  `uv run python -m campus_rag.analytics` reports volume, latency percentiles, refusal rate, and
+  ratings. Logs stay in the local database and record no user identity.
+- **Mock ticketing (M12):** migration `005` adds `mock_tickets`. A loopback mock ticketing API
+  (`uv run python -m campus_rag.ticketing`, port 8001) creates and lists tickets, and the MCP server
+  adds a `draft_ticket` tool. When an answer is refused, the API response suggests drafting a
+  ticket; the agent or user decides whether to file it.

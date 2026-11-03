@@ -24,9 +24,26 @@ class EmbeddingSettings:
 
 
 @dataclass(frozen=True)
+class ChatSettings:
+    """OpenAI-compatible chat endpoint and the models used for answers, rewrites, and judging."""
+
+    base_url: str = "http://127.0.0.1:11434/v1"
+    answer_model: str = "qwen2.5:7b-instruct"
+    rewrite_model: str = "qwen2.5:3b-instruct"
+    judge_model: str = "llama3.1:8b"
+    timeout_seconds: float = 300.0
+    api_key: str | None = field(default=None, repr=False)
+
+    def __post_init__(self) -> None:
+        if self.timeout_seconds <= 0:
+            raise ValueError(f"chat timeout must be > 0, got {self.timeout_seconds}")
+
+
+@dataclass(frozen=True)
 class Settings:
     database_url: str
     embedding: EmbeddingSettings = field(default_factory=EmbeddingSettings)
+    chat: ChatSettings = field(default_factory=ChatSettings)
 
 
 def find_repo_root(start: Path | None = None) -> Path | None:
@@ -69,7 +86,11 @@ def load_settings(
         port = values.get("CAMPUS_RAG_DB_PORT", "5433")
         name = values.get("CAMPUS_RAG_DB_NAME", "campus_rag")
         url = f"postgresql://{user}:{password}@{host}:{port}/{name}"
-    return Settings(database_url=url, embedding=_load_embedding_settings(values))
+    return Settings(
+        database_url=url,
+        embedding=_load_embedding_settings(values),
+        chat=_load_chat_settings(values),
+    )
 
 
 def _load_embedding_settings(values: Mapping[str, str]) -> EmbeddingSettings:
@@ -98,4 +119,29 @@ def _load_embedding_settings(values: Mapping[str, str]) -> EmbeddingSettings:
         document_prefix=prefix("DOCUMENT_PREFIX", defaults.document_prefix),
         query_prefix=prefix("QUERY_PREFIX", defaults.query_prefix),
         api_key=values.get("CAMPUS_RAG_EMBEDDING_API_KEY") or None,
+    )
+
+
+def _load_chat_settings(values: Mapping[str, str]) -> ChatSettings:
+    defaults = ChatSettings()
+
+    def text(name: str, default: str) -> str:
+        return values.get(f"CAMPUS_RAG_CHAT_{name}") or default
+
+    raw_timeout = text("TIMEOUT_SECONDS", str(defaults.timeout_seconds)).strip()
+    try:
+        timeout = float(raw_timeout)
+    except ValueError:
+        timeout = 0.0
+    if timeout <= 0:
+        raise ValueError(
+            f"CAMPUS_RAG_CHAT_TIMEOUT_SECONDS must be a positive number, got {raw_timeout!r}"
+        )
+    return ChatSettings(
+        base_url=text("BASE_URL", defaults.base_url).rstrip("/"),
+        answer_model=text("ANSWER_MODEL", defaults.answer_model),
+        rewrite_model=text("REWRITE_MODEL", defaults.rewrite_model),
+        judge_model=text("JUDGE_MODEL", defaults.judge_model),
+        timeout_seconds=timeout,
+        api_key=values.get("CAMPUS_RAG_CHAT_API_KEY") or None,
     )

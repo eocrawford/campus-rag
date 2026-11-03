@@ -23,6 +23,11 @@ services:
   ollama:
     # Embedding model server (CPU only). Pinned so every machine runs the same server version.
     image: ollama/ollama:0.40.14
+    environment:
+      # Grounded-answer prompts can exceed Ollama's default context; never truncate silently.
+      OLLAMA_CONTEXT_LENGTH: "8192"
+      # Keep models loaded between requests so evaluation runs do not reload them.
+      OLLAMA_KEEP_ALIVE: "30m"
     ports:
       # Bound to loopback only.
       - "127.0.0.1:${CAMPUS_RAG_OLLAMA_PORT:-11434}:11434"
