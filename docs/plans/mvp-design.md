@@ -13,6 +13,7 @@ options considered, the recommendation, and its status. Update the status when a
 | 6 | Test strategy | Fake-provider unit tests, marked database tests, explicit evaluation runs | Decided 2026-11-03 |
 | 7 | Capability coverage additions | Add usage analytics with user feedback (M11); mock ticketing-system tool as an optional stretch (M12) | Decided 2026-11-03 |
 | 8 | Installs on restricted networks | Opt-in `-PackageIndexUrl` mirror install with lock hashes enforced; `uv.lock` stays canonical | Decided 2026-11-03 |
+| 9 | M3 corpus pipeline | UW Policy Directory only; sitemap-driven selection; cached polite fetch; heading-aware extraction and chunking; documents and chunks in PostgreSQL | Proposed |
 
 ## 1. Model provider
 
@@ -111,3 +112,84 @@ intercepted.
 and prints the rerun command with the mirror detected from `pip config list`. The build backend
 (hatchling) used for the editable install comes from the mirror without a hash check because it
 is not pinned in `uv.lock`.
+
+## 9. M3 corpus pipeline
+
+A survey on 2026-11-03 found:
+
+- **UW Policy Directory** (`policy.uw.edu`): 321 pages in `wp-sitemap-posts-page-1.xml`, mostly
+  under `/directory/` (Administrative Policy Statements 150, Presidential Orders 78, Board of
+  Regents Governance 34, Student Governance and Policies 27, Faculty Code 21, Executive Orders 6).
+  Pages are server-rendered WordPress with one `<main>`, one `<h1>`, and numbered `<h2>`/`<h3>`
+  sections. A sample policy has about 3,500 words in 20 sections.
+- **UW-IT Connect** (`it.uw.edu`): 686 sitemap URLs, but pages are a ServiceNow portal rendered in
+  the browser. The HTML holds only an application shell; article text is not present.
+
+### 9a. Sources
+
+| Option | Tradeoff |
+|--------|----------|
+| **Policy Directory only** | Clean, structured HTML; enough content for a realistic retrieval challenge. |
+| Add IT Connect through a headless browser | Doubles topical coverage, but adds a browser dependency, slower and heavier requests, and fragility to portal changes. |
+| Substitute another server-rendered UW site | Possible later; needs its own `robots.txt` and terms review. |
+
+**Recommendation:** Policy Directory only for the MVP. Keep IT Connect approved but deferred.
+
+### 9b. Page selection
+
+| Option | Tradeoff |
+|--------|----------|
+| **All `/directory/` policy pages with at least 150 words of body text** | About 300 pages, roughly 1,500-2,000 chunks; realistic distractors for retrieval; still small to fetch (about 6 minutes at one request per second) and cheap to embed. |
+| Curated slice of about 50 pages | Faster to inspect, but too few distractors to show hybrid retrieval's value. |
+
+**Recommendation:** all `/directory/` policy pages, filtered by a minimum word count so section
+index pages are skipped. Selection rules live in a committed configuration file (sitemap URL,
+include prefixes, exclusions, optional page cap); only URLs are committed, never content.
+
+### 9c. Fetching
+
+- Read `robots.txt` at run time and skip disallowed URLs.
+- One request per second, descriptive user agent linking to this repository.
+- Cache raw HTML under the ignored `data/raw/` directory with its fetch metadata.
+- Re-fetch with conditional requests (`If-None-Match`, `If-Modified-Since`) so unchanged pages
+  cost little.
+- Retry transient failures (timeouts, HTTP 429 and 5xx) with backoff; record permanent failures
+  and continue.
+
+### 9d. Extraction
+
+| Option | Tradeoff |
+|--------|----------|
+| **BeautifulSoup scoped to `<main>`** | Explicit and testable; keeps the heading hierarchy that chunking needs. Site-specific. |
+| Generic extractor (trafilatura) | Works on many sites without rules, but can flatten headings and drop tables. |
+
+**Recommendation:** BeautifulSoup (with the `lxml` parser) scoped to `<main>`. Drop navigation
+blocks such as the in-page table of contents; keep headings, paragraphs, lists, and table rows.
+Tests use small saved HTML fixtures written for the tests, not copied pages.
+
+### 9e. Chunking
+
+- Split at `<h2>`/`<h3>` boundaries first; split long sections at paragraph boundaries; merge
+  very short adjacent sections.
+- Target about 400 tokens, maximum 800, with about 50 tokens of overlap when a section is split.
+- Prefix each chunk with its heading path, for example `APS 2.4 ... > 2. Roles and
+  Responsibilities > D. Data Trustees`, so it stands on its own.
+- Count tokens with `tiktoken` using the `cl100k_base` encoding used by OpenAI embedding models.
+
+### 9f. Storage
+
+Migration `002` adds two tables; embeddings arrive in M4.
+
+| Table | Key columns |
+|-------|-------------|
+| `documents` | `id`, `url` (unique), `title`, `fetched_at`, `etag`, `last_modified`, `content_hash` |
+| `chunks` | `id`, `document_id`, `ordinal`, `heading_path`, `content`, `token_count`, `content_hash` |
+
+Ingestion is idempotent: an unchanged document is skipped; a changed document has its chunks
+replaced in one transaction; a document no longer selected is removed.
+
+### 9g. Command
+
+A new entry point, `uv run python -m campus_rag.ingest`, runs selection, fetch, extraction,
+chunking, and storage, with `--limit N` for trial runs and `--dry-run` to report without writing.
+The repository's rules require the maintainer's consent for a new command.

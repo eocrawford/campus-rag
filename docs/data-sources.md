@@ -18,7 +18,7 @@ campus-rag ingests only public documents that are intended for general readers.
 | Source | Scope | `robots.txt` (checked 2026-11-03) | Status |
 |--------|-------|-----------------------------------|--------|
 | [UW Policy Directory](https://policy.uw.edu) | Public policy pages listed in `https://policy.uw.edu/wp-sitemap.xml` | Allows all content; disallows `/wp-admin/` | Approved |
-| [UW-IT Connect](https://it.uw.edu) | Public help articles listed in `https://it.uw.edu/sitemap.xml` | Allows content; disallows `/wp-admin/`, `/wp-includes/`, `/tag/*`, `/*?s=*` | Approved |
+| [UW-IT Connect](https://it.uw.edu) | Public help articles listed in `https://it.uw.edu/sitemap.xml` | Allows content; disallows `/wp-admin/`, `/wp-includes/`, `/tag/*`, `/*?s=*` | Approved; deferred because pages render in the browser (see [decision 9](plans/mvp-design.md#9-m3-corpus-pipeline)) |
 
 Add a source only after confirming its `robots.txt` and terms of use permit automated retrieval.
 
