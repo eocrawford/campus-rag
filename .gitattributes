@@ -1,3 +1,9 @@
+# Normalize text files to LF in the repository and in checkouts on every platform.
+* text=auto eol=lf
+
+# PowerShell scripts keep CRLF for Windows PowerShell 5.1 and editors on Windows.
+*.ps1 text eol=crlf
+
 # Migration checksums are computed over exact file bytes, so Git must never rewrite their line
 # endings on checkout or commit.
 *.sql -text
