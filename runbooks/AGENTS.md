@@ -9,7 +9,7 @@
     description: Ask questions from the command line and read cited answers; follow-up chat, timing on CPU, exit codes, and troubleshooting.
     path: runbooks/ask-questions.md
   - name: evaluate-retrieval
-    description: Search the corpus from the command line and measure keyword, vector, and hybrid retrieval (recall@k, MRR, latency, HNSW recall) against the golden set; commands, how to read the tables, and exit codes.
+    description: Search the corpus from the command line and measure keyword, vector, and hybrid retrieval (recall@k, MRR, latency, HNSW recall) against the golden set, and compare embedding strategies (heading, task prefixes, bge-m3, reduced dimensions); commands, how to read the tables, and exit codes.
     path: runbooks/evaluate-retrieval.md
   - name: evaluate-answers
     description: Answer every golden question and measure refusals, citations, retrieval hits, follow-up rewriting, and judge-graded faithfulness and relevance; commands, duration on CPU, resuming, and how to read the report.

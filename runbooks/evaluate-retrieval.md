@@ -91,6 +91,7 @@ results in the raw JSON, which lists each question's rank in every mode.
 | `5` | The golden set is missing or invalid (evaluation only) | Check `eval/golden_set.jsonl` |
 | `6` | Another database error | Read the message; rerun |
 | `7` | The embedding server is unreachable or lacks the model | `docker compose up -d --wait ollama`, then pull the model; keyword search needs no server |
+| `8` | The embedding comparison cannot score a variant because its vectors are missing (`embeddings` only) | Rerun without `--skip-embed` |
 
 ## Troubleshooting
 
@@ -101,3 +102,60 @@ results in the raw JSON, which lists each question's rank in every mode.
 | `unrecognized configuration parameter "hnsw.iterative_scan"` | The database image has pgvector older than 0.8. Update the `db` image and recreate the container. |
 | `--write-report` shows `+uncommitted` | The working tree had changes when the report was written. Commit, then rerun to record the commit that produced the numbers. |
 | Latency is much higher than the committed report | The embedding model was loading or another model was using the CPU. Rerun on an idle machine. |
+
+## Compare embedding strategies
+
+**Goal.** Measure how much each embedding choice contributes to retrieval on the golden set:
+the heading path in the embedded text, the task prefixes, a second model (`bge-m3`), and
+reduced dimensions. The design is [decision 15](../docs/plans/mvp-design.md#15-embedding-strategy-experiment).
+The production index and its `nomic-embed-text` vectors are not changed.
+
+Run it on an idle machine, after any answer evaluation, because embedding saturates the CPU.
+
+```powershell
+docker compose exec ollama ollama pull bge-m3
+uv run python -m campus_rag.evaluate embeddings
+uv run python -m campus_rag.evaluate embeddings --variants no-heading,nomic-256 --skip-embed
+uv run python -m campus_rag.evaluate embeddings --write-report
+uv run python -m campus_rag.evaluate embeddings --drop
+```
+
+| Option | Effect |
+|--------|--------|
+| `--variants LIST` | Comma-separated variants: `baseline`, `no-heading`, `no-task-prefix`, `bge-m3`, `nomic-256`. Default: all. `baseline` always runs. |
+| `--skip-embed` | Reuse the stored experiment vectors and send no document embedding requests. Queries are still embedded. Corpus embedding times come from the newest earlier raw results. |
+| `--write-report` | Also writes `docs/results/embedding-strategies.md`. Commit it with the change it measures. |
+| `--drop` | Deletes the experiment vectors (model keys starting `experiment:`), prints how many rows it removed, and exits. Use it alone. |
+
+| Variant | What changes | Model calls |
+|---------|--------------|-------------|
+| `baseline` | Nothing: the production `nomic-embed-text` vectors | Queries only |
+| `no-heading` | The chunk is embedded without its heading path | Corpus and queries |
+| `no-task-prefix` | The `search_document: ` and `search_query: ` prefixes are removed | Corpus and queries |
+| `bge-m3` | `bge-m3` (1,024 dimensions, no prefixes) | Corpus and queries |
+| `nomic-256` | The first 256 values of the baseline vectors, renormalized | Queries only |
+
+Each variant is embedded in batches of 32, stored in `chunk_embeddings` under the model key
+`experiment:<variant>`, and searched by exact cosine scan. A rerun skips chunks whose stored
+content hash is current, so an interrupted run resumes where it stopped; the time reported for a
+resumed variant covers only the chunks embedded in the final run.
+
+**Time and disk.**
+
+| Variant | Time on this CPU | Disk |
+|---------|------------------|------|
+| `no-heading`, `no-task-prefix` | About 8 minutes each | About 6 MB each |
+| `bge-m3` | About 20 to 30 minutes | About 8 MB of vectors, plus about 1.2 GB for the model download |
+| `nomic-256` | Seconds | About 2 MB |
+
+Scoring all variants takes about a minute after embedding.
+
+**Read the results.** The command prints recall@1, @5, @10 and MRR@10 for vector and hybrid
+search, then embedding times, and writes per-question ranks to
+`eval-results/embeddings-<UTC timestamp>.json` (ignored by Git). Hybrid search fuses each
+variant's top 50 vector results with the production BM25 keyword results. With 36 questions, one
+question moves recall by about 0.03, so differences under 0.06 are not meaningful; the report says
+so.
+
+**Clean up.** Run `--drop` when the report is committed. It removes only `experiment:` rows, so
+the production vectors stay.

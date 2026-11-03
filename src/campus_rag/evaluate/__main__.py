@@ -31,6 +31,11 @@ COMMANDS: tuple[Command, ...] = (
         "answer every golden question; refusal, citation, retrieval, faithfulness, and relevance",
         "campus_rag.evaluate.answers",
     ),
+    Command(
+        "embeddings",
+        "compare embedding strategies (text, task prefixes, model, dimensions) with exact search",
+        "campus_rag.evaluate.embeddings",
+    ),
 )
 
 
