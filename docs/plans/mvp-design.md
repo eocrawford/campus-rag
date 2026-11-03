@@ -222,7 +222,7 @@ embedding model must accept chunks up to 800 tokens without truncation.
 
 | Option | Cost | Tradeoffs |
 |--------|------|-----------|
-| **Ollama with `nomic-embed-text`** (768 dimensions) | Free | Local and private; 8,192-token context covers every chunk; small and fast on CPU. Needs task prefixes (`search_document: ` for chunks, `search_query: ` for questions). |
+| **Ollama with `nomic-embed-text`** (768 dimensions) | Free | Local and private; small and fast on CPU. Ollama loads it with a 2,048-token context; the longest chunk measures 796 of its tokens, so every chunk fits with room to spare. Needs task prefixes (`search_document: ` for chunks, `search_query: ` for questions). |
 | Ollama with `bge-m3` (1,024 dimensions) | Free | Strong and multilingual, but larger and slower on CPU. A good second model for comparison in M6. |
 | Ollama with `mxbai-embed-large` (1,024 dimensions) | Free | Strong on benchmarks, but its 512-token context would truncate longer chunks. |
 | OpenAI `text-embedding-3-small` (1,536 dimensions) | About $0.01 per full embed, with a $5 minimum prepaid credit | Highest convenience and quality per dollar; requires a paid account. |
