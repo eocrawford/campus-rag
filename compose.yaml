@@ -1,4 +1,4 @@
-# Local development database: PostgreSQL 17 with the pgvector extension.
+# Local development services: PostgreSQL 17 with pgvector, and Ollama for embeddings.
 # Values come from .env (see .env.example); defaults match .env.example.
 name: campus-rag
 
@@ -20,5 +20,21 @@ services:
       timeout: 3s
       retries: 30
 
+  ollama:
+    # Embedding model server (CPU only). Pinned so every machine runs the same server version.
+    image: ollama/ollama:0.40.14
+    ports:
+      # Bound to loopback only.
+      - "127.0.0.1:${CAMPUS_RAG_OLLAMA_PORT:-11434}:11434"
+    volumes:
+      # Pulled models persist here; -ResetDatabase leaves this volume in place.
+      - campus-rag-ollama:/root/.ollama
+    healthcheck:
+      test: ["CMD", "ollama", "list"]
+      interval: 2s
+      timeout: 5s
+      retries: 30
+
 volumes:
   campus-rag-db:
+  campus-rag-ollama:

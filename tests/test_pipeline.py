@@ -8,7 +8,7 @@ from campus_rag.index.migrate import apply_migrations, discover_migrations
 from campus_rag.ingest import pipeline
 from campus_rag.ingest.chunk import chunk_document
 from campus_rag.ingest.models import ExtractedDocument, FetchedPage, Section, SourceConfig
-from campus_rag.ingest.pipeline import IngestReport, format_summary, run_ingest
+from campus_rag.ingest.pipeline import EmbedReport, IngestReport, format_summary, run_ingest
 
 BASE = "https://example.test/"
 LONG_TEXT = "Staff submit requests to the office. The committee reviews each request. " * 5
@@ -253,6 +253,22 @@ def test_format_summary() -> None:
     assert "min -, median -, max -" in format_summary(
         IngestReport(), requests_made=0, elapsed_seconds=0
     )
+
+
+def test_format_summary_embeddings_line() -> None:
+    plain = format_summary(IngestReport(), requests_made=0, elapsed_seconds=0)
+    assert "Embeddings" not in plain
+    text = format_summary(
+        IngestReport(), requests_made=0, elapsed_seconds=0, embeddings="skipped (--no-embed)"
+    )
+    assert "  Embeddings: skipped (--no-embed)" in text
+
+
+def test_embed_report_describe() -> None:
+    assert EmbedReport(0, 10, 0.1).describe() == "0 embedded, 10 already current"
+    report = EmbedReport(64, 0, 16.0)
+    assert report.chunks_per_second == 4.0
+    assert report.describe() == "64 embedded, 0 already current (16.0s, 4.0 chunks/s)"
 
 
 @pytest.fixture

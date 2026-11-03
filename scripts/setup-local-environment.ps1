@@ -5,7 +5,8 @@ Sets up the campus-rag local development environment and verifies it.
 .DESCRIPTION
 Checks prerequisites, starts the Docker engine if needed, creates .env from
 .env.example, installs Python and dependencies with uv, starts PostgreSQL with
-pgvector in Docker, applies database migrations, and runs the test suite.
+pgvector and the Ollama embedding model server in Docker, pulls and checks the
+embedding model, applies database migrations, and runs the test suite.
 
 Each step prints a numbered header and finishes with OK or FAILED. On failure
 the script prints the step, the reason, and the command that fixes it, then
@@ -20,18 +21,24 @@ Steps and exit codes:
   3  Environment file (.env)
   4  Python environment (uv sync --locked)
   5  Database container (docker compose up -d --wait db)
-  6  Migrations (uv run python -m campus_rag.index.migrate)
-  7  Verification (uv run pytest with CAMPUS_RAG_REQUIRE_DB=1)
+  6  Model server (docker compose up -d --wait ollama, model pull, embedding check)
+  7  Migrations (uv run python -m campus_rag.index.migrate)
+  8  Verification (uv run pytest with CAMPUS_RAG_REQUIRE_DB=1)
 
 See runbooks/local-environment-setup.md.
 
 .PARAMETER ResetDatabase
 Deletes the local database container and its data volume before starting a
 fresh database. Use it when the local database is broken or out of sync with
-the migrations. All local database data is lost.
+the migrations. All local database data is lost. Pulled embedding models are
+kept.
+
+.PARAMETER SkipModelServer
+Skips step 6 (the Ollama model server). Commands that embed text fail until
+the script runs without this switch.
 
 .PARAMETER SkipTests
-Skips step 7 (the test run).
+Skips step 8 (the test run).
 
 .PARAMETER DockerStartTimeoutSeconds
 How long to wait for the Docker engine after starting Docker Desktop.
@@ -66,11 +73,12 @@ Installs the locked Python packages from a package mirror.
 
 .NOTES
 Runs under Windows PowerShell 5.1 and PowerShell 7. Requires no administrator
-rights. Exit code 0 means success; exit codes 1-7 identify the failed step.
+rights. Exit code 0 means success; exit codes 1-8 identify the failed step.
 #>
 [CmdletBinding()]
 param(
     [switch]$ResetDatabase,
+    [switch]$SkipModelServer,
     [switch]$SkipTests,
     [ValidateRange(0, 3600)]
     [int]$DockerStartTimeoutSeconds = 180,
@@ -83,8 +91,13 @@ $ErrorActionPreference = 'Stop'
 
 $RepoRoot = Split-Path -Parent $PSScriptRoot
 $RunbookPath = 'runbooks\local-environment-setup.md'
-$TotalSteps = 7
+$TotalSteps = 8
 $DefaultDbPort = 5433
+$DefaultOllamaPort = 11434
+$DefaultEmbeddingBaseUrl = 'http://127.0.0.1:11434/v1'
+$DefaultEmbeddingModel = 'nomic-embed-text'
+$DefaultEmbeddingDimensions = 768
+$DefaultDocumentPrefix = 'search_document: '
 # uv output that means the network blocks the default package host.
 $NetworkFailurePattern = 'HandshakeFailure|SEC_E_|client error \(Connect\)|error sending request|files\.pythonhosted\.org'
 $ScriptTimer = [System.Diagnostics.Stopwatch]::StartNew()
@@ -93,6 +106,7 @@ $ScriptTimer = [System.Diagnostics.Stopwatch]::StartNew()
 $script:UvExe = $null
 $script:DockerExe = $null
 $script:DbConfig = $null
+$script:ModelConfig = $null
 
 function New-StepFailure {
     param(
@@ -186,19 +200,35 @@ function Read-DotEnv {
 
 function Get-ConfigValue {
     # Process environment variables override .env, matching Docker Compose and campus_rag.config.
+    # An empty value means "use the default" unless -AllowEmpty is set.
     param(
         [hashtable]$DotEnv,
         [string]$Name,
-        [string]$Default
+        [string]$Default,
+        [switch]$AllowEmpty
     )
     $fromProcess = [Environment]::GetEnvironmentVariable($Name, 'Process')
     if ($fromProcess) {
         return New-Object PSObject -Property @{ Value = $fromProcess; Source = 'environment variable' }
     }
-    if ($DotEnv.ContainsKey($Name) -and $DotEnv[$Name]) {
+    if ($DotEnv.ContainsKey($Name) -and ($AllowEmpty -or $DotEnv[$Name])) {
         return New-Object PSObject -Property @{ Value = $DotEnv[$Name]; Source = '.env' }
     }
     return New-Object PSObject -Property @{ Value = $Default; Source = 'default' }
+}
+
+function ConvertTo-PortNumber {
+    # Validates a port setting returned by Get-ConfigValue and returns it as an integer.
+    param(
+        [Parameter(Mandatory = $true)]$Setting,
+        [Parameter(Mandatory = $true)][string]$Name,
+        [Parameter(Mandatory = $true)][int]$Default
+    )
+    $number = 0
+    if (-not [int]::TryParse($Setting.Value, [ref]$number) -or $number -lt 1 -or $number -gt 65535) {
+        throw (New-StepFailure -Reason "$Name is '$($Setting.Value)' (from $($Setting.Source)); it must be a port number from 1 to 65535." -Fix "Set $Name=$Default in .env (and remove any $Name environment variable)")
+    }
+    return $number
 }
 
 function Get-PortListener {
@@ -328,7 +358,8 @@ function Invoke-Step2DockerEngine {
 function Invoke-Step3EnvironmentFile {
     $envFile = Join-Path $RepoRoot '.env'
     $exampleFile = Join-Path $RepoRoot '.env.example'
-    if (Test-Path -LiteralPath $envFile) {
+    $envFileExisted = Test-Path -LiteralPath $envFile
+    if ($envFileExisted) {
         Write-Detail 'Using existing .env (left unchanged).'
     }
     else {
@@ -340,11 +371,16 @@ function Invoke-Step3EnvironmentFile {
     }
 
     $dotEnv = Read-DotEnv -Path $envFile
-    $port = Get-ConfigValue -DotEnv $dotEnv -Name 'CAMPUS_RAG_DB_PORT' -Default ([string]$DefaultDbPort)
-    $portNumber = 0
-    if (-not [int]::TryParse($port.Value, [ref]$portNumber) -or $portNumber -lt 1 -or $portNumber -gt 65535) {
-        throw (New-StepFailure -Reason "CAMPUS_RAG_DB_PORT is '$($port.Value)' (from $($port.Source)); it must be a port number from 1 to 65535." -Fix "Set CAMPUS_RAG_DB_PORT=$DefaultDbPort in .env (and remove any CAMPUS_RAG_DB_PORT environment variable)")
+    if ($envFileExisted -and (Test-Path -LiteralPath $exampleFile)) {
+        $exampleKeys = @((Read-DotEnv -Path $exampleFile).Keys)
+        $missingKeys = @($exampleKeys | Where-Object { -not $dotEnv.ContainsKey($_) } | Sort-Object)
+        if ($missingKeys.Count -gt 0) {
+            Write-Note ".env does not set $($missingKeys -join ', '). Their defaults apply; to override one, copy its line from .env.example into .env."
+        }
     }
+
+    $port = Get-ConfigValue -DotEnv $dotEnv -Name 'CAMPUS_RAG_DB_PORT' -Default ([string]$DefaultDbPort)
+    $portNumber = ConvertTo-PortNumber -Setting $port -Name 'CAMPUS_RAG_DB_PORT' -Default $DefaultDbPort
     $hostName = Get-ConfigValue -DotEnv $dotEnv -Name 'CAMPUS_RAG_DB_HOST' -Default '127.0.0.1'
     $dbName = Get-ConfigValue -DotEnv $dotEnv -Name 'CAMPUS_RAG_DB_NAME' -Default 'campus_rag'
     $url = Get-ConfigValue -DotEnv $dotEnv -Name 'CAMPUS_RAG_DATABASE_URL' -Default ''
@@ -376,6 +412,41 @@ function Invoke-Step3EnvironmentFile {
         TargetSource = $targetSource
     }
     Write-Detail "Database port: $portNumber (from $($port.Source))"
+
+    $ollamaPort = Get-ConfigValue -DotEnv $dotEnv -Name 'CAMPUS_RAG_OLLAMA_PORT' -Default ([string]$DefaultOllamaPort)
+    $ollamaPortNumber = ConvertTo-PortNumber -Setting $ollamaPort -Name 'CAMPUS_RAG_OLLAMA_PORT' -Default $DefaultOllamaPort
+    $baseUrl = Get-ConfigValue -DotEnv $dotEnv -Name 'CAMPUS_RAG_EMBEDDING_BASE_URL' -Default $DefaultEmbeddingBaseUrl
+    $model = Get-ConfigValue -DotEnv $dotEnv -Name 'CAMPUS_RAG_EMBEDDING_MODEL' -Default $DefaultEmbeddingModel
+    $dimensions = Get-ConfigValue -DotEnv $dotEnv -Name 'CAMPUS_RAG_EMBEDDING_DIMENSIONS' -Default ([string]$DefaultEmbeddingDimensions)
+    $documentPrefix = Get-ConfigValue -DotEnv $dotEnv -Name 'CAMPUS_RAG_EMBEDDING_DOCUMENT_PREFIX' -Default $DefaultDocumentPrefix -AllowEmpty
+    $apiKey = Get-ConfigValue -DotEnv $dotEnv -Name 'CAMPUS_RAG_EMBEDDING_API_KEY' -Default ''
+
+    $baseUrlText = $baseUrl.Value.Trim().TrimEnd('/')
+    $baseUri = $null
+    if (-not [System.Uri]::TryCreate($baseUrlText, [System.UriKind]::Absolute, [ref]$baseUri) -or ($baseUri.Scheme -ne 'http' -and $baseUri.Scheme -ne 'https')) {
+        throw (New-StepFailure -Reason "CAMPUS_RAG_EMBEDDING_BASE_URL is '$(Get-RedactedText $baseUrlText)' (from $($baseUrl.Source)); it must be an http or https URL." -Fix "Set CAMPUS_RAG_EMBEDDING_BASE_URL=$DefaultEmbeddingBaseUrl in .env")
+    }
+    $dimensionsNumber = 0
+    if (-not [int]::TryParse($dimensions.Value, [ref]$dimensionsNumber) -or $dimensionsNumber -lt 1) {
+        throw (New-StepFailure -Reason "CAMPUS_RAG_EMBEDDING_DIMENSIONS is '$($dimensions.Value)' (from $($dimensions.Source)); it must be a positive whole number." -Fix "Set CAMPUS_RAG_EMBEDDING_DIMENSIONS=$DefaultEmbeddingDimensions in .env (the size $DefaultEmbeddingModel returns)")
+    }
+    $displayBaseUrl = Get-RedactedText $baseUrlText
+    if ($baseUri.IsLoopback -and $baseUri.Port -ne $ollamaPortNumber) {
+        Write-Note "CAMPUS_RAG_EMBEDDING_BASE_URL uses port $($baseUri.Port), but the Ollama container publishes port $ollamaPortNumber (CAMPUS_RAG_OLLAMA_PORT). Make them match."
+    }
+
+    $script:ModelConfig = New-Object PSObject -Property @{
+        OllamaPort     = $ollamaPortNumber
+        BaseUrl        = $baseUrlText
+        DisplayBaseUrl = $displayBaseUrl
+        IsLocal        = $baseUri.IsLoopback
+        Model          = $model.Value
+        Dimensions     = $dimensionsNumber
+        DocumentPrefix = $documentPrefix.Value
+        ApiKey         = $apiKey.Value
+    }
+    Write-Detail "Model server port: $ollamaPortNumber (from $($ollamaPort.Source))"
+    Write-Detail "Embeddings: $displayBaseUrl, model $($model.Value), $dimensionsNumber dimensions"
 }
 
 function Assert-UsableLockFile {
@@ -504,49 +575,304 @@ function Invoke-Step4PythonEnvironment {
     }
 }
 
+function Assert-ServicePortFree {
+    # Fails when the compose service is not running and another process already listens on its port.
+    param(
+        [Parameter(Mandatory = $true)][string]$Service,
+        [Parameter(Mandatory = $true)][int]$Port,
+        [Parameter(Mandatory = $true)][string]$PortFix
+    )
+    $running = Invoke-Native -FilePath $script:DockerExe -ArgumentList @('compose', 'ps', '--status', 'running', '-q', $Service) -Quiet
+    if ($running.ExitCode -ne 0) {
+        throw (New-StepFailure -Reason "docker compose ps failed with exit code $($running.ExitCode): $(Get-LastLine $running.Output)" -Fix 'docker compose ps   (read its error, then rerun)')
+    }
+    if (Get-LastLine $running.Output) {
+        return
+    }
+    $listeners = @(Get-PortListener -Port $Port)
+    if ($listeners.Count -gt 0) {
+        $owners = ($listeners | ForEach-Object { "$($_.ProcessName) (PID $($_.ProcessId))" }) -join ', '
+        $fix = "Stop that process, or $PortFix, then rerun."
+        if ($owners -match 'docker|wslrelay|vpnkit') {
+            $fix = "Another container publishes port $Port; find it with: docker ps --filter publish=$Port   Stop it, or $PortFix, then rerun."
+        }
+        throw (New-StepFailure -Reason "port $Port is already in use by $owners." -Fix $fix)
+    }
+}
+
+function Start-ComposeService {
+    # Runs 'docker compose up -d --wait <service>' and turns failures into step failures.
+    param(
+        [Parameter(Mandatory = $true)][string]$Service,
+        [Parameter(Mandatory = $true)][string]$Description,
+        [Parameter(Mandatory = $true)][int]$Port,
+        [Parameter(Mandatory = $true)][string]$PortFix,
+        [Parameter(Mandatory = $true)][string]$HealthFix
+    )
+    $up = Invoke-Native -FilePath $script:DockerExe -ArgumentList @('compose', 'up', '-d', '--wait', $Service)
+    if ($up.ExitCode -ne 0) {
+        $output = $up.Output -join "`n"
+        if ($output -match 'port is already allocated|address already in use|bind') {
+            throw (New-StepFailure -Reason "the $Description could not bind port $Port; another process or container is using it." -Fix "$PortFix, then rerun. Find containers with: docker ps --filter publish=$Port")
+        }
+        if ($output -match 'unhealthy') {
+            throw (New-StepFailure -Reason "the $Description container started but failed its health check." -Fix $HealthFix)
+        }
+        throw (New-StepFailure -Reason "docker compose up -d --wait $Service failed with exit code $($up.ExitCode): $(Get-LastLine $up.Output)" -Fix "Check network access for the image pull and read the error above. Inspect with: docker compose logs $Service")
+    }
+}
+
+function Remove-DatabaseData {
+    # Removes only the db container and its named volume. 'docker compose down --volumes' would also
+    # delete the Ollama model volume.
+    $config = Invoke-Native -FilePath $script:DockerExe -ArgumentList @('compose', 'config', '--format', 'json') -Quiet
+    if ($config.ExitCode -ne 0) {
+        throw (New-StepFailure -Reason "docker compose config failed with exit code $($config.ExitCode): $(Get-LastLine $config.Output)" -Fix 'docker compose config --quiet   (read its error, then rerun)')
+    }
+    $volumeName = $null
+    try {
+        $volumeName = ($config.Output -join "`n" | ConvertFrom-Json).volumes.'campus-rag-db'.name
+    }
+    catch {
+        $volumeName = $null
+    }
+    if (-not $volumeName) {
+        throw (New-StepFailure -Reason 'could not find the campus-rag-db volume in compose.yaml.' -Fix 'git checkout -- compose.yaml   (then rerun)')
+    }
+
+    $remove = Invoke-Native -FilePath $script:DockerExe -ArgumentList @('compose', 'rm', '--stop', '--force', '-v', 'db')
+    if ($remove.ExitCode -ne 0) {
+        throw (New-StepFailure -Reason "docker compose rm db failed with exit code $($remove.ExitCode): $(Get-LastLine $remove.Output)" -Fix 'docker compose rm --stop --force db   (read its error, then rerun)')
+    }
+    $inspect = Invoke-Native -FilePath $script:DockerExe -ArgumentList @('volume', 'inspect', $volumeName) -Quiet
+    if ($inspect.ExitCode -eq 0) {
+        $volume = Invoke-Native -FilePath $script:DockerExe -ArgumentList @('volume', 'rm', $volumeName)
+        if ($volume.ExitCode -ne 0) {
+            throw (New-StepFailure -Reason "docker volume rm $volumeName failed with exit code $($volume.ExitCode): $(Get-LastLine $volume.Output)" -Fix "docker volume rm $volumeName   (read its error, then rerun)")
+        }
+    }
+    Write-Detail "Local database container and volume $volumeName deleted. The model volume is kept."
+}
+
 function Invoke-Step5DatabaseContainer {
     $port = $script:DbConfig.Port
     if ($ResetDatabase) {
         Write-Host '    WARNING: -ResetDatabase deletes the local database container and ALL of its data.' -ForegroundColor Yellow
-        $down = Invoke-Native -FilePath $script:DockerExe -ArgumentList @('compose', 'down', '--volumes')
-        if ($down.ExitCode -ne 0) {
-            throw (New-StepFailure -Reason "docker compose down --volumes failed with exit code $($down.ExitCode): $(Get-LastLine $down.Output)" -Fix 'docker compose down --volumes   (read its error, then rerun)')
-        }
-        Write-Detail 'Local database and volume deleted.'
+        Remove-DatabaseData
     }
 
-    $running = Invoke-Native -FilePath $script:DockerExe -ArgumentList @('compose', 'ps', '--status', 'running', '-q', 'db') -Quiet
-    if ($running.ExitCode -ne 0) {
-        throw (New-StepFailure -Reason "docker compose ps failed with exit code $($running.ExitCode): $(Get-LastLine $running.Output)" -Fix 'docker compose ps   (read its error, then rerun)')
-    }
-    $dbRunning = [bool](Get-LastLine $running.Output)
-    if (-not $dbRunning) {
-        $listeners = @(Get-PortListener -Port $port)
-        if ($listeners.Count -gt 0) {
-            $owners = ($listeners | ForEach-Object { "$($_.ProcessName) (PID $($_.ProcessId))" }) -join ', '
-            $fix = "Stop that process, or set CAMPUS_RAG_DB_PORT to a free port (for example 5434) in .env, then rerun."
-            if ($owners -match 'docker|wslrelay|vpnkit') {
-                $fix = "Another container publishes port $port; find it with: docker ps --filter publish=$port   Stop it, or set CAMPUS_RAG_DB_PORT to a free port in .env, then rerun."
-            }
-            throw (New-StepFailure -Reason "port $port is already in use by $owners." -Fix $fix)
-        }
-    }
-
-    $up = Invoke-Native -FilePath $script:DockerExe -ArgumentList @('compose', 'up', '-d', '--wait', 'db')
-    if ($up.ExitCode -ne 0) {
-        $output = $up.Output -join "`n"
-        if ($output -match 'port is already allocated|address already in use|bind') {
-            throw (New-StepFailure -Reason "the database could not bind port $port; another process or container is using it." -Fix "Set CAMPUS_RAG_DB_PORT to a free port (for example 5434) in .env, then rerun. Find containers with: docker ps --filter publish=$port")
-        }
-        if ($output -match 'unhealthy') {
-            throw (New-StepFailure -Reason 'the database container started but failed its health check.' -Fix 'docker compose logs db   (read the error; if the data volume is corrupt, rerun with -ResetDatabase)')
-        }
-        throw (New-StepFailure -Reason "docker compose up -d --wait db failed with exit code $($up.ExitCode): $(Get-LastLine $up.Output)" -Fix 'Check network access for the image pull and read the error above. Inspect with: docker compose logs db')
-    }
+    $portFix = 'set CAMPUS_RAG_DB_PORT to a free port (for example 5434) in .env'
+    Assert-ServicePortFree -Service 'db' -Port $port -PortFix $portFix
+    Start-ComposeService -Service 'db' -Description 'database' -Port $port -PortFix ($portFix.Substring(0, 1).ToUpper() + $portFix.Substring(1)) -HealthFix 'docker compose logs db   (read the error; if the data volume is corrupt, rerun with -ResetDatabase)'
     Write-Detail "Database is healthy on 127.0.0.1:$port."
 }
 
-function Invoke-Step6Migrations {
+function Test-ModelListed {
+    # True when 'ollama list' output contains the model; a name without a tag matches ':latest'.
+    param(
+        [string[]]$ListOutput,
+        [Parameter(Mandatory = $true)][string]$Model
+    )
+    $wanted = @($Model.ToLowerInvariant())
+    if ($Model -notmatch ':') {
+        $wanted += "$($Model.ToLowerInvariant()):latest"
+    }
+    foreach ($line in $ListOutput) {
+        $name = ($line.Trim() -split '\s+')[0]
+        if ($name -and $wanted -contains $name.ToLowerInvariant()) {
+            return $true
+        }
+    }
+    return $false
+}
+
+function Invoke-OllamaPull {
+    # Pulls a model through the Ollama HTTP API and prints ASCII progress every 10 percent.
+    # Returns $null on success or the error text.
+    param(
+        [Parameter(Mandatory = $true)][int]$Port,
+        [Parameter(Mandatory = $true)][string]$Model
+    )
+    $request = [System.Net.WebRequest]::Create("http://127.0.0.1:$Port/api/pull")
+    $request.Method = 'POST'
+    $request.ContentType = 'application/json'
+    $request.Proxy = $null
+    $request.Timeout = 60000
+    $request.ReadWriteTimeout = 600000
+    $body = [System.Text.Encoding]::UTF8.GetBytes((@{ model = $Model; stream = $true } | ConvertTo-Json -Compress))
+    $response = $null
+    try {
+        $requestStream = $request.GetRequestStream()
+        $requestStream.Write($body, 0, $body.Length)
+        $requestStream.Close()
+        $response = $request.GetResponse()
+        $reader = New-Object System.IO.StreamReader($response.GetResponseStream())
+        $lastStatus = ''
+        $lastDecile = @{}
+        $succeeded = $false
+        while ($null -ne ($line = $reader.ReadLine())) {
+            if (-not $line.Trim()) {
+                continue
+            }
+            $update = $line | ConvertFrom-Json
+            if ($update.PSObject.Properties['error'] -and $update.error) {
+                return [string]$update.error
+            }
+            $status = [string]$update.status
+            if ($status -eq 'success') {
+                $succeeded = $true
+            }
+            $isLayer = $status -match '^pulling [0-9a-f]{12}'
+            if ($isLayer) {
+                if ($update.PSObject.Properties['total'] -and $update.PSObject.Properties['completed'] -and $update.total -ge 1000000) {
+                    $layer = [string]$update.digest
+                    $decile = [int][Math]::Floor(10 * $update.completed / $update.total)
+                    if (-not $lastDecile.ContainsKey($layer) -or $decile -gt $lastDecile[$layer]) {
+                        $lastDecile[$layer] = $decile
+                        Write-Detail ('{0}: {1,3}% of {2:N0} MB' -f $status, (10 * $decile), ($update.total / 1000000))
+                    }
+                }
+            }
+            elseif ($status -ne $lastStatus) {
+                Write-Detail $status
+            }
+            $lastStatus = $status
+        }
+        if (-not $succeeded) {
+            return 'the pull ended without reporting success'
+        }
+        return $null
+    }
+    catch {
+        $message = $_.Exception.Message
+        if ($_.Exception.InnerException) {
+            $message = $_.Exception.InnerException.Message
+        }
+        return $message
+    }
+    finally {
+        if ($response) {
+            $response.Close()
+        }
+    }
+}
+
+function Test-EmbeddingEndpoint {
+    # Embeds one prefixed sample text and checks the vector size.
+    $config = $script:ModelConfig
+    $url = "$($config.BaseUrl)/embeddings"
+    $displayUrl = "$($config.DisplayBaseUrl)/embeddings"
+    $sample = "$($config.DocumentPrefix)The campus library is open until midnight during finals week."
+    $body = [System.Text.Encoding]::UTF8.GetBytes((@{ model = $config.Model; input = @($sample) } | ConvertTo-Json -Compress))
+    $headers = @{}
+    if ($config.ApiKey) {
+        $headers['Authorization'] = "Bearer $($config.ApiKey)"
+    }
+    $request = @{
+        Uri         = $url
+        Method      = 'Post'
+        ContentType = 'application/json'
+        Body        = $body
+        Headers     = $headers
+        TimeoutSec  = 120
+        ErrorAction = 'Stop'
+    }
+    if ($config.IsLocal -and $PSVersionTable.PSVersion.Major -ge 7) {
+        $request['NoProxy'] = $true
+    }
+
+    $reachFix = 'docker compose ps ollama   (it should show "healthy"); make sure the port in CAMPUS_RAG_EMBEDDING_BASE_URL matches CAMPUS_RAG_OLLAMA_PORT in .env, then rerun'
+    if (-not $config.IsLocal) {
+        $reachFix = 'Check CAMPUS_RAG_EMBEDDING_BASE_URL, CAMPUS_RAG_EMBEDDING_MODEL, and CAMPUS_RAG_EMBEDDING_API_KEY in .env, then rerun'
+    }
+    $timer = [System.Diagnostics.Stopwatch]::StartNew()
+    try {
+        $response = Invoke-RestMethod @request
+    }
+    catch {
+        $status = $null
+        $responseProperty = $_.Exception.PSObject.Properties['Response']
+        if ($responseProperty -and $responseProperty.Value) {
+            try {
+                $status = [int]$responseProperty.Value.StatusCode
+            }
+            catch {
+                $status = $null
+            }
+        }
+        $detail = $_.Exception.Message
+        if ($_.ErrorDetails -and $_.ErrorDetails.Message) {
+            $detail = $_.ErrorDetails.Message
+        }
+        $detail = Get-RedactedText ($detail -replace '\s+', ' ').Trim()
+        if ($detail.Length -gt 300) {
+            $detail = $detail.Substring(0, 300) + '...'
+        }
+        if ($status) {
+            throw (New-StepFailure -Reason "the embeddings endpoint $displayUrl returned HTTP ${status}: $detail" -Fix $reachFix)
+        }
+        throw (New-StepFailure -Reason "cannot reach the embeddings endpoint $displayUrl ($detail)." -Fix $reachFix)
+    }
+
+    $vector = $null
+    if ($response -and $response.PSObject.Properties['data'] -and @($response.data).Count -gt 0) {
+        $first = @($response.data)[0]
+        if ($first.PSObject.Properties['embedding']) {
+            $vector = @($first.embedding)
+        }
+    }
+    if ($null -eq $vector -or $vector.Count -eq 0) {
+        throw (New-StepFailure -Reason "the embeddings endpoint $displayUrl returned no embedding." -Fix $reachFix)
+    }
+    if ($vector.Count -ne $config.Dimensions) {
+        throw (New-StepFailure -Reason "model $($config.Model) returns $($vector.Count)-dimensional vectors, but CAMPUS_RAG_EMBEDDING_DIMENSIONS is $($config.Dimensions)." -Fix "Set CAMPUS_RAG_EMBEDDING_DIMENSIONS=$($vector.Count) in .env (and remove any CAMPUS_RAG_EMBEDDING_DIMENSIONS environment variable), or choose a model that returns $($config.Dimensions) dimensions")
+    }
+    Write-Detail ('Embedding check passed: {0} returned {1} dimensions in {2:N1}s.' -f $config.Model, $vector.Count, $timer.Elapsed.TotalSeconds)
+}
+
+function Invoke-Step6ModelServer {
+    if ($SkipModelServer) {
+        Write-Detail 'Skipped (-SkipModelServer). Commands that embed text fail until you rerun without -SkipModelServer.'
+        return
+    }
+    $config = $script:ModelConfig
+    if ($config.IsLocal) {
+        $port = $config.OllamaPort
+        $portFix = 'set CAMPUS_RAG_OLLAMA_PORT to a free port (for example 11436) in .env and use the same port in CAMPUS_RAG_EMBEDDING_BASE_URL'
+        Assert-ServicePortFree -Service 'ollama' -Port $port -PortFix $portFix
+        Start-ComposeService -Service 'ollama' -Description 'model server' -Port $port -PortFix ($portFix.Substring(0, 1).ToUpper() + $portFix.Substring(1)) -HealthFix 'docker compose logs ollama   (read the error, then rerun)'
+        Write-Detail "Model server is healthy on 127.0.0.1:$port."
+
+        $list = Invoke-Native -FilePath $script:DockerExe -ArgumentList @('compose', 'exec', '-T', 'ollama', 'ollama', 'list') -Quiet
+        if ($list.ExitCode -ne 0) {
+            throw (New-StepFailure -Reason "'ollama list' failed with exit code $($list.ExitCode): $(Get-LastLine $list.Output)" -Fix 'docker compose logs ollama   (read the error, then rerun)')
+        }
+        if (Test-ModelListed -ListOutput $list.Output -Model $config.Model) {
+            Write-Detail "Model $($config.Model) is already pulled."
+        }
+        else {
+            $sizeNote = ''
+            if ($config.Model -match '^nomic-embed-text(:latest)?$') {
+                $sizeNote = ' (about 275 MB)'
+            }
+            Write-Detail "Pulling model $($config.Model)$sizeNote..."
+            $pullError = Invoke-OllamaPull -Port $port -Model $config.Model
+            if ($pullError) {
+                $pullError = Get-RedactedText $pullError
+                if ($pullError -match '(?i)file does not exist|not found|manifest unknown') {
+                    throw (New-StepFailure -Reason "model $($config.Model) was not found in the Ollama library ($pullError)." -Fix "Check CAMPUS_RAG_EMBEDDING_MODEL in .env (default: $DefaultEmbeddingModel), then rerun")
+                }
+                throw (New-StepFailure -Reason "could not pull model $($config.Model): $pullError" -Fix "Check access to registry.ollama.ai, then rerun. To pull by hand: docker compose exec ollama ollama pull $($config.Model)")
+            }
+        }
+    }
+    else {
+        Write-Detail "CAMPUS_RAG_EMBEDDING_BASE_URL points to a remote provider ($($config.DisplayBaseUrl)); the local Ollama container is not started."
+    }
+    Test-EmbeddingEndpoint
+}
+
+function Invoke-Step7Migrations {
     $result = Invoke-Native -FilePath $script:UvExe -ArgumentList @('run', 'python', '-m', 'campus_rag.index.migrate')
     switch ($result.ExitCode) {
         0 { return }
@@ -562,7 +888,7 @@ function Invoke-Step6Migrations {
     }
 }
 
-function Invoke-Step7Verification {
+function Invoke-Step8Verification {
     if ($SkipTests) {
         Write-Detail 'Skipped (-SkipTests).'
         return
@@ -622,8 +948,9 @@ $steps = @(
     @{ Name = 'Environment file'; Action = ${function:Invoke-Step3EnvironmentFile} },
     @{ Name = 'Python environment'; Action = ${function:Invoke-Step4PythonEnvironment} },
     @{ Name = 'Database container'; Action = ${function:Invoke-Step5DatabaseContainer} },
-    @{ Name = 'Migrations'; Action = ${function:Invoke-Step6Migrations} },
-    @{ Name = 'Verification'; Action = ${function:Invoke-Step7Verification} }
+    @{ Name = 'Model server'; Action = ${function:Invoke-Step6ModelServer} },
+    @{ Name = 'Migrations'; Action = ${function:Invoke-Step7Migrations} },
+    @{ Name = 'Verification'; Action = ${function:Invoke-Step8Verification} }
 )
 
 $exitCode = 0
@@ -651,12 +978,18 @@ try {
         }
         Write-Host ''
         Write-Host ("Setup complete in {0:N1}s." -f $ScriptTimer.Elapsed.TotalSeconds) -ForegroundColor Green
-        Write-Host "  Database:  $($script:DbConfig.Target) (from $($script:DbConfig.TargetSource))"
-        Write-Host "  Python:    $pythonText"
-        Write-Host "  Tests:     $testsText"
-        Write-Host '  Stop DB:   docker compose stop db'
-        Write-Host '  Reset DB:  .\scripts\setup-local-environment.ps1 -ResetDatabase   (deletes local data)'
-        Write-Host "  Runbook:   $RunbookPath"
+        Write-Host "  Database:   $($script:DbConfig.Target) (from $($script:DbConfig.TargetSource))"
+        $model = $script:ModelConfig
+        $embeddingText = "$($model.DisplayBaseUrl), model $($model.Model), $($model.Dimensions) dimensions"
+        if ($SkipModelServer) {
+            $embeddingText = "$embeddingText (not checked: -SkipModelServer)"
+        }
+        Write-Host "  Embeddings: $embeddingText"
+        Write-Host "  Python:     $pythonText"
+        Write-Host "  Tests:      $testsText"
+        Write-Host '  Stop:       docker compose stop db ollama'
+        Write-Host '  Reset DB:   .\scripts\setup-local-environment.ps1 -ResetDatabase   (deletes database data; keeps models)'
+        Write-Host "  Runbook:    $RunbookPath"
     }
 }
 finally {

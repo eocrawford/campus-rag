@@ -1,9 +1,9 @@
 # Runbook: local environment setup
 
 **Goal.** Set up and verify a Windows workstation for campus-rag development with one command. The
-command installs the Python environment, starts PostgreSQL with pgvector in Docker, applies database
-migrations, and runs the tests. It either succeeds or stops at the first failed step and prints the
-command that fixes it.
+command installs the Python environment, starts PostgreSQL with pgvector and the Ollama embedding
+model server in Docker, pulls and checks the embedding model, applies database migrations, and runs
+the tests. It either succeeds or stops at the first failed step and prints the command that fixes it.
 
 ## Prerequisites
 
@@ -13,10 +13,14 @@ command that fixes it.
 | Git | `winget install --id Git.Git -e` | `git --version` |
 | uv (installs Python 3.12 for you) | `winget install --id astral-sh.uv -e` | `uv --version` |
 | Docker Desktop with the WSL 2 backend | `winget install --id Docker.DockerDesktop -e` | `docker info` |
+| About 10 GB of free disk space for Docker | | Docker Desktop **Settings > Resources** |
 
 Open a new terminal after installing a tool so its `PATH` change takes effect. Start Docker Desktop
 once after installing it and accept its terms. The script needs no administrator rights and installs
 nothing itself.
+
+The first run downloads the PostgreSQL image (about 0.6 GB on disk), the Ollama image (about 8.5 GB
+on disk), and the `nomic-embed-text` embedding model (about 275 MB). Later runs reuse them.
 
 ## Run
 
@@ -26,9 +30,8 @@ From the repository root:
 .\scripts\setup-local-environment.ps1
 ```
 
-The script works from any directory, in Windows PowerShell 5.1 or PowerShell 7. The first run
-downloads Python, the dependencies, and the database image, so it takes a few minutes. Later runs
-take seconds and change nothing.
+The script works from any directory, in Windows PowerShell 5.1 or PowerShell 7. The first run takes
+several minutes. Later runs take under a minute and change nothing.
 
 If Windows PowerShell reports that running scripts is disabled, allow local scripts once:
 
@@ -47,25 +50,34 @@ step number.
 2. **Docker engine.** Checks that the Docker engine responds and runs Linux containers. If it does
    not respond, the script starts Docker Desktop and waits for the engine.
 3. **Environment file.** Creates `.env` from `.env.example` when `.env` is missing. An existing
-   `.env` is never changed. Reads `CAMPUS_RAG_DB_PORT` (default `5433`). Environment variables set
-   in the terminal override `.env`, matching Docker Compose and the application.
+   `.env` is never changed; when it lacks settings that `.env.example` defines, the script lists
+   them and their defaults apply. Reads the database port, the Ollama port, and the embedding
+   settings. Environment variables set in the terminal override `.env`, matching Docker Compose and
+   the application.
 4. **Python environment.** Runs `uv sync --locked` to install Python 3.12 and the locked
    dependencies into `.venv`. With `-PackageIndexUrl`, installs the same locked packages from a
    mirror instead (see [Restricted networks](#restricted-networks)).
 5. **Database container.** Checks that the database port is free, then runs
-   `docker compose up -d --wait db` to start PostgreSQL 17 with pgvector on
-   `127.0.0.1:5433` and wait until it is healthy.
-6. **Migrations.** Runs `uv run python -m campus_rag.index.migrate` to apply pending migrations.
-7. **Verification.** Runs `uv run pytest` with `CAMPUS_RAG_REQUIRE_DB=1`, so database tests fail
+   `docker compose up -d --wait db` to start PostgreSQL 17 with pgvector on `127.0.0.1:5433` and
+   wait until it is healthy.
+6. **Model server.** Checks that the Ollama port is free, then runs
+   `docker compose up -d --wait ollama` to start Ollama on `127.0.0.1:11434`. Pulls the embedding
+   model (`CAMPUS_RAG_EMBEDDING_MODEL`) when `ollama list` does not show it, printing progress.
+   Then embeds one sample text through `CAMPUS_RAG_EMBEDDING_BASE_URL` and checks that the vector
+   has `CAMPUS_RAG_EMBEDDING_DIMENSIONS` values. When the base URL points to a hosted provider
+   instead of this machine, the script skips the Ollama container and checks the provider.
+7. **Migrations.** Runs `uv run python -m campus_rag.index.migrate` to apply pending migrations.
+8. **Verification.** Runs `uv run pytest` with `CAMPUS_RAG_REQUIRE_DB=1`, so database tests fail
    instead of skipping when the database is unreachable. Tests use a temporary database and leave
-   the main `campus_rag` database unchanged.
+   the main `campus_rag` database unchanged. Tests use a fake embedder and need no model server.
 
 ## Options
 
 | Option | Effect |
 |--------|--------|
-| `-SkipTests` | Skips step 7. |
-| `-ResetDatabase` | Deletes the local database container and its data volume (`docker compose down --volumes`), then creates a fresh database. All local database data is lost. |
+| `-SkipTests` | Skips step 8. |
+| `-SkipModelServer` | Skips step 6. Commands that embed text fail until you rerun without it. |
+| `-ResetDatabase` | Deletes the database container and its data volume, then creates a fresh database. All local database data is lost. Pulled models are kept. |
 | `-DockerStartTimeoutSeconds <n>` | Seconds to wait for the Docker engine after starting Docker Desktop. Default: 180. |
 | `-PackageIndexUrl <url>` | Installs the locked Python packages from a package mirror. See [Restricted networks](#restricted-networks). |
 
@@ -102,16 +114,18 @@ After setup, `uv run` commands need no network access, because the environment a
 A successful run ends with a summary like this:
 
 ```text
-Setup complete in 12.3s.
-  Database:  127.0.0.1:5433/campus_rag (from CAMPUS_RAG_DB_* settings)
-  Python:    Python 3.12.x
-  Tests:     passed
-  Stop DB:   docker compose stop db
-  Reset DB:  .\scripts\setup-local-environment.ps1 -ResetDatabase   (deletes local data)
-  Runbook:   runbooks\local-environment-setup.md
+Setup complete in 34.2s.
+  Database:   127.0.0.1:5433/campus_rag (from CAMPUS_RAG_DB_* settings)
+  Embeddings: http://127.0.0.1:11434/v1, model nomic-embed-text, 768 dimensions
+  Python:     Python 3.12.x
+  Tests:      passed
+  Stop:       docker compose stop db ollama
+  Reset DB:   .\scripts\setup-local-environment.ps1 -ResetDatabase   (deletes database data; keeps models)
+  Runbook:    runbooks\local-environment-setup.md
 ```
 
-The exit code is `0`. Check it with `$LASTEXITCODE`.
+Step 6 prints `Embedding check passed: nomic-embed-text returned 768 dimensions in <n>s.` The exit code is
+`0`. Check it with `$LASTEXITCODE`.
 
 ## Troubleshooting
 
@@ -126,17 +140,28 @@ Each failure prints `FAILED at step N (<step>): <reason>` and a `Fix:` line. Com
 | `FAILED at step 2 (Docker engine): the Docker engine did not respond` | Docker Desktop is still starting, is waiting for you to accept its terms, or WSL 2 is not working. | Start Docker Desktop and wait for "Engine running". Check WSL 2 with `wsl --status`. Rerun with a longer wait: `-DockerStartTimeoutSeconds 300`. |
 | `... DOCKER_HOST is set to ...` | `DOCKER_HOST` points the Docker CLI at an unreachable engine. | `Remove-Item Env:DOCKER_HOST`, then rerun. |
 | `FAILED at step 2 (Docker engine): Docker is running windows containers` | Docker Desktop is in Windows containers mode. | Right-click the Docker tray icon and choose **Switch to Linux containers**. |
-| `FAILED at step 3 (Environment file): CAMPUS_RAG_DB_PORT is` | The port value is not a number from 1 to 65535. | Set `CAMPUS_RAG_DB_PORT=5433` in `.env` and remove any `CAMPUS_RAG_DB_PORT` environment variable. |
+| `FAILED at step 3 (Environment file): CAMPUS_RAG_DB_PORT is` or `CAMPUS_RAG_OLLAMA_PORT is` | The port value is not a number from 1 to 65535. | Set the port in `.env` (defaults: `5433` and `11434`) and remove any environment variable with the same name. |
+| `FAILED at step 3 (Environment file): CAMPUS_RAG_EMBEDDING_BASE_URL is` | The base URL is not an `http` or `https` URL. | Set `CAMPUS_RAG_EMBEDDING_BASE_URL=http://127.0.0.1:11434/v1` in `.env`. |
+| `FAILED at step 3 (Environment file): CAMPUS_RAG_EMBEDDING_DIMENSIONS is` | The dimensions value is not a positive whole number. | Set `CAMPUS_RAG_EMBEDDING_DIMENSIONS=768` in `.env`. |
 | `FAILED at step 4 (Python environment): uv.lock is out of date` | `pyproject.toml` changed without updating `uv.lock`. | `uv lock` on a network that can reach PyPI, rerun, and commit the updated `uv.lock`. |
-| `FAILED at step 4 (Python environment): cannot download packages from files.pythonhosted.org (this network blocks it, or the machine is offline).` | The network blocks PyPI's file host. | Rerun with `-PackageIndexUrl <your package mirror URL>`. See [Restricted networks](#restricted-networks). |
+| `FAILED at step 4 (Python environment): cannot download packages from files.pythonhosted.org` | The network blocks PyPI's file host, or the machine is offline. | Rerun with `-PackageIndexUrl <your package mirror URL>`. See [Restricted networks](#restricted-networks). |
 | `FAILED at step 4 (Python environment): the mirror served files whose hashes differ from uv.lock.` | The mirror serves modified or rebuilt files. | Use a mirror that serves the original PyPI files. |
 | `FAILED at step 4 (Python environment): cannot download packages from the mirror` | The mirror URL is wrong, unreachable, or needs credentials. | Check the URL with `pip config list` or your mirror's documentation, then rerun. |
 | `FAILED at step 4 (Python environment): uv sync --locked failed` | uv could not install Python or packages for another reason. | Read the uv error above the message, then rerun. Reproduce with `uv sync --locked`. |
 | `FAILED at step 5 (Database container): port 5433 is already in use by` | Another program, such as a local PostgreSQL, uses the port. | Stop that program, or set `CAMPUS_RAG_DB_PORT=5434` in `.env` and rerun. |
 | `FAILED at step 5 (Database container): the database container started but failed its health check` | PostgreSQL could not start, often because of a damaged data volume. | `docker compose logs db`. If the data is disposable, rerun with `-ResetDatabase`. |
-| `FAILED at step 6 (Migrations): cannot connect to the database` | The database is not running, or `.env` points at a different host, port, or credentials. | `docker compose ps db` should show `healthy`. Compare the `CAMPUS_RAG_DB_*` values in `.env` with the running container. |
-| `FAILED at step 6 (Migrations): a migration failed` | A migration has an error, or an applied migration file was changed or removed. | Fix the migration. If the local database is out of sync, rerun with `-ResetDatabase`. |
-| `FAILED at step 7 (Verification): tests failed` | One or more tests failed. | Read the pytest output. Rerun with `$env:CAMPUS_RAG_REQUIRE_DB='1'; uv run pytest`. |
+| `FAILED at step 5 (Database container): docker volume rm` | During `-ResetDatabase`, another container still uses the database volume. | Find it with `docker ps -a --filter volume=campus-rag_campus-rag-db`, remove it, then rerun. |
+| `FAILED at step 6 (Model server): port 11434 is already in use by` | Another program, often a native Ollama install, uses the port. | Stop that program, or set `CAMPUS_RAG_OLLAMA_PORT=11436` and `CAMPUS_RAG_EMBEDDING_BASE_URL=http://127.0.0.1:11436/v1` in `.env`, then rerun. |
+| `FAILED at step 6 (Model server): the model server container started but failed its health check` | Ollama could not start. | `docker compose logs ollama`, then rerun. |
+| `FAILED at step 6 (Model server): 'ollama list' failed` | The Ollama container is not responding. | `docker compose logs ollama`. Restart it with `docker compose restart ollama`, then rerun. |
+| `FAILED at step 6 (Model server): model <name> was not found in the Ollama library` | `CAMPUS_RAG_EMBEDDING_MODEL` names a model that Ollama does not publish. | Set `CAMPUS_RAG_EMBEDDING_MODEL=nomic-embed-text` in `.env`, then rerun. |
+| `FAILED at step 6 (Model server): could not pull model` | The model download failed, often because the network blocks `registry.ollama.ai`. | Check network access, then rerun. To pull by hand: `docker compose exec ollama ollama pull nomic-embed-text`. |
+| `FAILED at step 6 (Model server): cannot reach the embeddings endpoint` | The model server is not running, or `CAMPUS_RAG_EMBEDDING_BASE_URL` uses a different port than `CAMPUS_RAG_OLLAMA_PORT`. | `docker compose ps ollama` should show `healthy`. Make the two ports match in `.env`. |
+| `FAILED at step 6 (Model server): the embeddings endpoint ... returned HTTP` | The server rejected the request: the model is missing, or a hosted provider rejected the API key. | Check `CAMPUS_RAG_EMBEDDING_MODEL` and `CAMPUS_RAG_EMBEDDING_API_KEY` in `.env`. |
+| `FAILED at step 6 (Model server): model <name> returns <N>-dimensional vectors, but CAMPUS_RAG_EMBEDDING_DIMENSIONS is <M>.` | The configured dimensions do not match the model. | Set `CAMPUS_RAG_EMBEDDING_DIMENSIONS=<N>` in `.env` and remove any environment variable with the same name, or choose a model that returns `<M>` dimensions. |
+| `FAILED at step 7 (Migrations): cannot connect to the database` | The database is not running, or `.env` points at a different host, port, or credentials. | `docker compose ps db` should show `healthy`. Compare the `CAMPUS_RAG_DB_*` values in `.env` with the running container. |
+| `FAILED at step 7 (Migrations): a migration failed` | A migration has an error, or an applied migration file was changed or removed. | Fix the migration. If the local database is out of sync, rerun with `-ResetDatabase`. |
+| `FAILED at step 8 (Verification): tests failed` | One or more tests failed. | Read the pytest output. Rerun with `$env:CAMPUS_RAG_REQUIRE_DB='1'; uv run pytest`. |
 | `running scripts is disabled on this system` | The PowerShell execution policy blocks local scripts. | `Set-ExecutionPolicy -Scope CurrentUser RemoteSigned` |
 
 ## Everyday commands
@@ -145,18 +170,24 @@ Run these from the repository root.
 
 | Task | Command |
 |------|---------|
-| Start the database | `docker compose up -d --wait db` |
-| Stop the database (keeps data) | `docker compose stop db` |
+| Start the database and model server | `docker compose up -d --wait db ollama` |
+| Stop them (keeps data and models) | `docker compose stop db ollama` |
+| List pulled models | `docker compose exec ollama ollama list` |
 | Run the tests | `uv run pytest` |
 | Lint | `uv run ruff check src tests` |
 | Apply migrations | `uv run python -m campus_rag.index.migrate` |
-| Reset the local database (deletes data) | `.\scripts\setup-local-environment.ps1 -ResetDatabase` |
+| Reset the local database (deletes data, keeps models) | `.\scripts\setup-local-environment.ps1 -ResetDatabase` |
+| Delete pulled models | `docker compose rm --stop --force ollama`, then `docker volume rm campus-rag_campus-rag-ollama` |
 
 `uv run pytest` skips database tests when the database is not running. Set
 `CAMPUS_RAG_REQUIRE_DB=1` to make them fail instead.
 
+`docker compose down --volumes` deletes both the database and the pulled models. Use
+`-ResetDatabase` to delete only the database.
+
 ## Secrets
 
 `.env` holds local settings and is ignored by Git. The database password in `.env.example` is for the
-local container only. Never commit API keys or a `.env` file. The model API key
-(`CAMPUS_RAG_LLM_API_KEY`) is needed from milestone 4; store it in `.env` or an environment variable.
+local container only. The local Ollama server needs no API key. To use a hosted embedding provider,
+set `CAMPUS_RAG_EMBEDDING_API_KEY` in `.env` or an environment variable; the script never prints it.
+Never commit API keys or a `.env` file. The answer-generation model arrives in milestone 7.

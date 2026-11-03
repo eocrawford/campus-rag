@@ -1,6 +1,7 @@
 """Store documents and their chunks in PostgreSQL, idempotently."""
 
 import hashlib
+import math
 from collections.abc import Collection, Sequence
 from typing import Literal
 
@@ -118,3 +119,65 @@ def schema_version_applied(conn: psycopg.Connection, version: int) -> bool:
         "SELECT 1 FROM schema_migrations WHERE version = %s", (version,)
     ).fetchone()
     return found is not None
+
+
+def vector_literal(vector: Sequence[float]) -> str:
+    """Format `vector` as a pgvector text literal such as '[0.1,0.2]'; cast it with ::vector."""
+    if not all(math.isfinite(x) for x in vector):
+        raise ValueError("vector contains NaN or infinity")
+    return "[" + ",".join(repr(float(x)) for x in vector) + "]"
+
+
+def chunks_needing_embeddings(conn: psycopg.Connection, model: str) -> list[tuple[int, str, str]]:
+    """Return (chunk_id, content, content_hash) for chunks with no embedding from `model`,
+    or whose stored embedding was made from different content. Ordered by chunk id."""
+    return [
+        (row[0], row[1], row[2])
+        for row in conn.execute(
+            "SELECT c.id, c.content, c.content_hash FROM chunks c "
+            "LEFT JOIN chunk_embeddings e ON e.chunk_id = c.id AND e.model = %s "
+            "WHERE e.chunk_id IS NULL OR e.content_hash <> c.content_hash "
+            "ORDER BY c.id",
+            (model,),
+        )
+    ]
+
+
+def save_embeddings(
+    conn: psycopg.Connection,
+    model: str,
+    dimensions: int,
+    rows: Sequence[tuple[int, str, Sequence[float]]],
+) -> None:
+    """Upsert (chunk_id, content_hash, vector) rows for `model` in one transaction."""
+    params = []
+    for chunk_id, content_hash, vector in rows:
+        if len(vector) != dimensions:
+            raise ValueError(
+                f"chunk {chunk_id}: vector has {len(vector)} dimensions, expected {dimensions}"
+            )
+        params.append((chunk_id, model, dimensions, content_hash, vector_literal(vector)))
+    with conn.transaction(), conn.cursor() as cur:
+        cur.executemany(
+            "INSERT INTO chunk_embeddings (chunk_id, model, dimensions, content_hash, embedding) "
+            "VALUES (%s, %s, %s, %s, %s::vector) "
+            "ON CONFLICT (chunk_id, model) DO UPDATE SET dimensions = EXCLUDED.dimensions, "
+            "content_hash = EXCLUDED.content_hash, embedding = EXCLUDED.embedding, "
+            "embedded_at = now()",
+            params,
+        )
+
+
+def count_chunks(conn: psycopg.Connection) -> int:
+    row = conn.execute("SELECT count(*) FROM chunks").fetchone()
+    assert row is not None
+    return row[0]
+
+
+def count_embeddings(conn: psycopg.Connection, model: str) -> int:
+    """Number of chunks that have an embedding from `model`."""
+    row = conn.execute(
+        "SELECT count(*) FROM chunk_embeddings WHERE model = %s", (model,)
+    ).fetchone()
+    assert row is not None
+    return row[0]

@@ -4,13 +4,21 @@ Stages are passed in as functions so the pipeline can run against fakes in tests
 """
 
 import statistics
+import time
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from typing import Protocol
 
 import psycopg
 
-from campus_rag.index.store import remove_missing_documents, upsert_document
+from campus_rag.index.embed import Embedder
+from campus_rag.index.store import (
+    chunks_needing_embeddings,
+    count_chunks,
+    remove_missing_documents,
+    save_embeddings,
+    upsert_document,
+)
 from campus_rag.ingest.models import Chunk, ExtractedDocument, FetchedPage, SourceConfig
 
 
@@ -188,12 +196,84 @@ def _removal_skip_reason(
     return None
 
 
-def format_summary(report: IngestReport, *, requests_made: int, elapsed_seconds: float) -> str:
-    """Multi-line run summary for the console."""
+@dataclass(frozen=True)
+class EmbedReport:
+    embedded: int
+    already_current: int
+    elapsed_seconds: float
+
+    @property
+    def chunks_per_second(self) -> float | None:
+        if self.embedded == 0 or self.elapsed_seconds <= 0:
+            return None
+        return self.embedded / self.elapsed_seconds
+
+    def describe(self) -> str:
+        text = f"{self.embedded} embedded, {self.already_current} already current"
+        rate = self.chunks_per_second
+        if rate is not None:
+            text += f" ({self.elapsed_seconds:.1f}s, {rate:.1f} chunks/s)"
+        return text
+
+
+def run_embedding(
+    conn: psycopg.Connection,
+    embedder: Embedder,
+    *,
+    log: Callable[[str], None],
+    batch_size: int = 32,
+) -> EmbedReport:
+    """Embed every stored chunk that lacks a current embedding from `embedder.model`.
+
+    Each batch is saved before the next is requested, so a failure keeps the finished batches and
+    a rerun resumes. Chunks that already have an embedding for their current content are not sent.
+    """
+    if batch_size < 1:
+        raise ValueError("batch_size must be >= 1")
+    started = time.monotonic()
+    pending = chunks_needing_embeddings(conn, embedder.model)
+    already_current = count_chunks(conn) - len(pending)
+    if not pending:
+        log(f"embeddings: all {already_current} chunks already have {embedder.model} embeddings")
+        return EmbedReport(0, already_current, time.monotonic() - started)
+
+    log(f"embeddings: {len(pending)} chunks to embed with {embedder.model}")
+    done = 0
+    for start in range(0, len(pending), batch_size):
+        batch = pending[start : start + batch_size]
+        vectors = embedder.embed_documents([content for _, content, _ in batch])
+        if len(vectors) != len(batch):
+            raise ValueError(f"embedder returned {len(vectors)} vectors for {len(batch)} chunks")
+        save_embeddings(
+            conn,
+            embedder.model,
+            embedder.dimensions,
+            [
+                (chunk_id, digest, vec)
+                for (chunk_id, _, digest), vec in zip(batch, vectors, strict=True)
+            ],
+        )
+        done += len(batch)
+        log(f"embedded {done}/{len(pending)} chunks")
+    return EmbedReport(done, already_current, time.monotonic() - started)
+
+
+def format_summary(
+    report: IngestReport,
+    *,
+    requests_made: int,
+    elapsed_seconds: float,
+    embeddings: str | None = None,
+) -> str:
+    """Multi-line run summary for the console.
+
+    `embeddings` is the text of the Embeddings line; the line is omitted when it is None.
+    """
 
     def stat(value: float | None) -> str:
         return "-" if value is None else f"{value:g}"
 
+    embeddings_line = [] if embeddings is None else [f"  Embeddings: {embeddings}"]
     return "\n".join(
         [
             "Summary",
@@ -205,6 +285,7 @@ def format_summary(report: IngestReport, *, requests_made: int, elapsed_seconds:
             f"{report.unchanged} unchanged, {report.removed} removed",
             f"  Chunks:    {report.chunks} (tokens per chunk: min {stat(report.token_min)}, "
             f"median {stat(report.token_median)}, max {stat(report.token_max)})",
+            *embeddings_line,
             f"  Requests:  {requests_made} HTTP requests",
             f"  Elapsed:   {elapsed_seconds:.1f}s",
         ]
