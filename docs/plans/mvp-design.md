@@ -11,6 +11,7 @@ options considered, the recommendation, and its status. Update the status when a
 | 4 | Database access | psycopg 3 with plain SQL and numbered migrations | Decided 2026-11-03 |
 | 5 | Package layout | Single `campus_rag` package organized by pipeline stage | Decided 2026-11-03 |
 | 6 | Test strategy | Fake-provider unit tests, marked database tests, explicit evaluation runs | Decided 2026-11-03 |
+| 7 | Capability coverage additions | Add usage analytics with user feedback; consider a mock ticketing-system tool | Proposed |
 
 ## 1. Model provider
 
@@ -77,3 +78,17 @@ src/campus_rag/
 - **Unit tests** use `pytest` with fake model providers and never call paid APIs.
 - **Database tests** run against the local PostgreSQL container and carry a marker so they can be skipped.
 - **Evaluation** runs only when invoked explicitly; it is not part of the test suite.
+
+## 7. Capability coverage additions
+
+The [glossary](../glossary.md) maps common AI-agent engineering capabilities to this project.
+Several are marked **Background** because the MVP does not exercise them. These additions would
+cover the most valuable gaps at low cost:
+
+| Option | Capability covered | Cost | Recommendation |
+|--------|--------------------|------|----------------|
+| **Usage analytics and feedback** | Monitoring performance, usage analytics, user feedback loops | Small: log each request's latency, retrieval scores, and outcome; accept a thumbs-up/down rating; report summaries | Add as a milestone after M9 |
+| **Mock ticketing tool** | Enterprise-system integration, workflow automation | Medium: an MCP tool that drafts a help-desk ticket in a local mock ticketing API when the corpus cannot answer | Optional stretch goal |
+| Multi-agent orchestration (CrewAI or A2A) | Agent orchestration, agent-to-agent coordination | Large; adds frameworks without improving answer quality | Skip for MVP |
+| Fine-tuning | Model customization | Large; retrieval already supplies the domain knowledge | Skip |
+| No-code builder | Tools for non-technical users | Large; outside this project's purpose | Skip |

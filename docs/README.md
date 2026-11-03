@@ -5,6 +5,7 @@
 - [Architecture](architecture.md) - components, request flow, and design tradeoffs.
 - [Evaluation](evaluation.md) - golden question set, retrieval and answer metrics, and how to compare changes.
 - [Data sources and usage policy](data-sources.md) - which sources may be ingested and how.
+- [Glossary](glossary.md) - each term's problem, solution, and where it appears in campus-rag.
 
 ## Plans
 

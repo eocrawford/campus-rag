@@ -21,6 +21,9 @@ university documents with cited sources. This guide is for agents and humans mak
 * Retrieval and prompt changes need evaluation evidence. Follow [evaluation](docs/evaluation.md)
   and report before/after metrics in the pull request.
 * Only ingest sources permitted by [data sources and usage policy](docs/data-sources.md).
+* Keep the [glossary](docs/glossary.md) current. When a change implements a glossary term, update
+  its row in the same change: link to the code or measured results and set its status to
+  **Implemented**.
 
 ## File locations
 

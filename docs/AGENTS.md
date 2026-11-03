@@ -5,6 +5,7 @@
 | Architecture, request flow, and design tradeoffs | [`docs/architecture.md`](architecture.md) |
 | Evaluation method, golden set, and metrics | [`docs/evaluation.md`](evaluation.md) |
 | Permitted data sources and ingestion policy | [`docs/data-sources.md`](data-sources.md) |
+| Glossary: each term's problem, solution, and where it appears in campus-rag | [`docs/glossary.md`](glossary.md) |
 | Agent rules of engagement | [`docs/agent-guidance/RoE.md`](agent-guidance/RoE.md) |
 | Foundations: deterministic code versus LLM judgment, Python conventions | [`docs/agent-guidance/foundations.md`](agent-guidance/foundations.md) |
 | Prose authoring guidelines | [`docs/agent-guidance/prose-authoring-guidelines.md`](agent-guidance/prose-authoring-guidelines.md) |

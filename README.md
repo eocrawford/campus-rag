@@ -47,6 +47,7 @@ See [architecture](docs/architecture.md) for design details and tradeoffs.
 - [Architecture](docs/architecture.md)
 - [Evaluation](docs/evaluation.md)
 - [Data sources and usage policy](docs/data-sources.md)
+- [Glossary](docs/glossary.md) - RAG and AI-agent terms, the problem each solves, and where it appears here
 - [Runbooks](runbooks/AGENTS.md)
 - [Contributor and agent guide](AGENTS.md)
 
