@@ -3,14 +3,14 @@
 This record tracks the design decisions for the [MVP plan](mvp.md). Each decision lists the
 options considered, the recommendation, and its status. Update the status when a decision is made.
 
-| # | Decision | Recommendation | Status |
-|---|----------|----------------|--------|
-| 1 | Model provider | OpenAI-compatible interface; start with GitHub Models | Open |
-| 2 | Corpus | UW Policy Directory and UW-IT Connect | Proposed; pending `robots.txt` and terms review |
-| 3 | Python tooling | uv | Proposed |
-| 4 | Database access | psycopg 3 with plain SQL and numbered migrations | Proposed |
-| 5 | Package layout | Single `campus_rag` package organized by pipeline stage | Proposed |
-| 6 | Test strategy | Fake-provider unit tests, marked database tests, explicit evaluation runs | Proposed |
+| # | Decision | Choice | Status |
+|---|----------|--------|--------|
+| 1 | Model provider | OpenAI-compatible interface; start with GitHub Models | Decided 2026-11-03 |
+| 2 | Corpus | UW Policy Directory and UW-IT Connect, under the [terms constraints](../data-sources.md#uw-terms-of-use-constraints) | Decided 2026-11-03 |
+| 3 | Python tooling | uv | Decided 2026-11-03 |
+| 4 | Database access | psycopg 3 with plain SQL and numbered migrations | Decided 2026-11-03 |
+| 5 | Package layout | Single `campus_rag` package organized by pipeline stage | Decided 2026-11-03 |
+| 6 | Test strategy | Fake-provider unit tests, marked database tests, explicit evaluation runs | Decided 2026-11-03 |
 
 ## 1. Model provider
 
@@ -35,7 +35,9 @@ credentials.
 and useful to staff and students.
 
 Before ingestion, confirm each site's `robots.txt` and terms of use permit automated retrieval,
-then record the result in [data sources](../data-sources.md).
+then record the result in [data sources](../data-sources.md). Both sites were reviewed on
+2026-11-03; the terms limit reproduction and redistribution, so content stays local and the
+golden set is written in original words.
 
 ## 3. Python tooling
 

@@ -8,8 +8,9 @@ stay faithful to them? Measuring them separately shows where a failure comes fro
 The golden set is a versioned file of questions, each with:
 
 - the question text;
-- the source URL and passage that contain the answer;
-- a short reference answer; and
+- the source URL and section that contain the answer;
+- a short reference answer written in original words (never copied source text; see
+  [data sources](data-sources.md#uw-terms-of-use-constraints)); and
 - a flag for questions the corpus cannot answer, which test refusal behavior.
 
 Target size for the MVP is 40 questions, including at least 5 unanswerable ones. Questions should
