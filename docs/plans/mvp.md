@@ -17,3 +17,5 @@ documents with citations, and demonstrates measurable gains from hybrid retrieva
 | 8 | Answer evaluation | Faithfulness, relevance, and refusal metrics reported with an independent judge | Not started |
 | 9 | Interfaces | FastAPI `search` and `answer` endpoints; MCP `search` tool | Not started |
 | 10 | Write-up | README results table and a short case study of findings | Not started |
+| 11 | Usage analytics and feedback | Each request logs latency, retrieval scores, and outcome; users can rate answers; a report summarizes usage and ratings | Not started |
+| 12 | Mock ticketing tool (stretch) | When the corpus cannot answer, an MCP tool drafts a help-desk ticket in a local mock ticketing API | Not started |

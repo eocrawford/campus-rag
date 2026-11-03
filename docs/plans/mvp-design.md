@@ -11,7 +11,7 @@ options considered, the recommendation, and its status. Update the status when a
 | 4 | Database access | psycopg 3 with plain SQL and numbered migrations | Decided 2026-11-03 |
 | 5 | Package layout | Single `campus_rag` package organized by pipeline stage | Decided 2026-11-03 |
 | 6 | Test strategy | Fake-provider unit tests, marked database tests, explicit evaluation runs | Decided 2026-11-03 |
-| 7 | Capability coverage additions | Add usage analytics with user feedback; consider a mock ticketing-system tool | Proposed |
+| 7 | Capability coverage additions | Add usage analytics with user feedback (M11); mock ticketing-system tool as an optional stretch (M12) | Decided 2026-11-03 |
 | 8 | Installs on restricted networks | Opt-in `-PackageIndexUrl` mirror install with lock hashes enforced; `uv.lock` stays canonical | Proposed (implemented in M2 setup script) |
 
 ## 1. Model provider
@@ -88,8 +88,8 @@ cover the most valuable gaps at low cost:
 
 | Option | Capability covered | Cost | Recommendation |
 |--------|--------------------|------|----------------|
-| **Usage analytics and feedback** | Monitoring performance, usage analytics, user feedback loops | Small: log each request's latency, retrieval scores, and outcome; accept a thumbs-up/down rating; report summaries | Add as a milestone after M9 |
-| **Mock ticketing tool** | Enterprise-system integration, workflow automation | Medium: an MCP tool that drafts a help-desk ticket in a local mock ticketing API when the corpus cannot answer | Optional stretch goal |
+| **Usage analytics and feedback** | Monitoring performance, usage analytics, user feedback loops | Small: log each request's latency, retrieval scores, and outcome; accept a thumbs-up/down rating; report summaries | Approved as M11 |
+| **Mock ticketing tool** | Enterprise-system integration, workflow automation | Medium: an MCP tool that drafts a help-desk ticket in a local mock ticketing API when the corpus cannot answer | Approved as optional stretch M12 |
 | Multi-agent orchestration (CrewAI or A2A) | Agent orchestration, agent-to-agent coordination | Large; adds frameworks without improving answer quality | Skip for MVP |
 | Fine-tuning | Model customization | Large; retrieval already supplies the domain knowledge | Skip |
 | No-code builder | Tools for non-technical users | Large; outside this project's purpose | Skip |

@@ -68,7 +68,7 @@ to **Implemented**.
 | **nebulaONE** | Institutions want governed, secure access to generative AI without building a platform. | Provides a commercial enterprise generative-AI platform adopted by some universities. | Not used. | Background |
 | **Fine-tuning** | A general model may not follow a specialized format, style, or domain reliably. | Further trains the model on task-specific examples. | Retrieval is used instead. | Background |
 | **Alignment** | Models can pursue instructions in ways that conflict with intended goals or values. | Trains and constrains models to behave helpfully, honestly, and safely. | Not used. | Background |
-| **Intelligent automation** (AI-powered workflow automation) | Staff spend time on repetitive process steps that require reading and judgment. | Combines AI with workflow tools so routine steps run automatically, with people handling exceptions. | Not used. | Background |
+| **Intelligent automation** (AI-powered workflow automation) | Staff spend time on repetitive process steps that require reading and judgment. | Combines AI with workflow tools so routine steps run automatically, with people handling exceptions. | Unanswerable questions become drafted help-desk tickets through the mock ticketing tool. | Planned (M12, stretch) |
 
 ## Evaluation, safety, and operations
 
@@ -85,8 +85,8 @@ to **Implemented**.
 | **Guardrails** | Model outputs can be wrong, off-topic, or unsafe. | Places deterministic checks and rules around the model that block or correct bad outputs. | Citation validation, refusal on missing evidence, source allowlist. | Planned (M7) |
 | **Safety mechanisms** | Harmful or incorrect outputs can reach users. | Applies controls before output is returned, such as validation, refusal, and filtering. | Deterministic checks run before an answer is returned. | Planned (M7) |
 | **Responsible AI** | AI systems can mislead, expose private data, or treat people unfairly. | Applies principles such as transparency, accountability, privacy, and fairness throughout design and operation. | Cited answers, honest refusals, polite crawling, no protected data. [Data sources](data-sources.md) | Planned (M3, M7) |
-| **Usage analytics** | Teams cannot improve a deployed system without knowing how it is used and where it fails. | Records volume, latency, and outcomes for each request. | See [proposed decision 7](plans/mvp-design.md#7-capability-coverage-additions). | Background |
-| **User feedback loop** | Metrics alone miss what users find unhelpful. | Collects user ratings and comments and feeds them into evaluation and fixes. | See [proposed decision 7](plans/mvp-design.md#7-capability-coverage-additions). | Background |
+| **Usage analytics** | Teams cannot improve a deployed system without knowing how it is used and where it fails. | Records volume, latency, and outcomes for each request. | Request logging and a usage report. [Decision 7](plans/mvp-design.md#7-capability-coverage-additions) | Planned (M11) |
+| **User feedback loop** | Metrics alone miss what users find unhelpful. | Collects user ratings and comments and feeds them into evaluation and fixes. | Thumbs-up/down ratings on answers, summarized in the usage report. [Decision 7](plans/mvp-design.md#7-capability-coverage-additions) | Planned (M11) |
 
 ## Platform and integration
 
@@ -96,12 +96,12 @@ to **Implemented**.
 | **FastAPI** | Building typed, documented Python APIs takes boilerplate. | Generates validation and OpenAPI documentation from Python type hints. | The service's API layer. | Planned (M9) |
 | **Docker** (containerization) | Software behaves differently across machines because of differing dependencies. | Packages software with its dependencies into containers that run the same everywhere. | PostgreSQL with pgvector runs in Docker: [`compose.yaml`](../compose.yaml), started by [setup](../runbooks/local-environment-setup.md). | Implemented |
 | **Cloud platforms** (AWS, Azure, GCP) | Owning and running servers is costly and slow to scale. | Rents compute, storage, and managed services on demand (Amazon Web Services, Microsoft Azure, Google Cloud Platform). | Runs locally; see [UW terms constraints](data-sources.md#uw-terms-of-use-constraints). | Background |
-| **Connector** | Each external system has its own API and data format. | Encapsulates one system's integration behind a consistent interface. | Source fetchers for the allowlisted sites. | Planned (M3) |
+| **Connector** | Each external system has its own API and data format. | Encapsulates one system's integration behind a consistent interface. | Source fetchers for the allowlisted sites; the mock ticketing API client. | Planned (M3, M12) |
 | **SIS** (student information system) | Universities need one authoritative record of students, enrollment, and grades. | Centralizes student academic records and related processes. | Not used. | Background |
 | **LMS** (learning management system) | Courses need a shared place for content, assignments, and grades. | Hosts course materials and coursework, as in Canvas. | Not used. | Background |
 | **HRIS** (human resources information system) | Employee data and HR processes are scattered and manual. | Centralizes employee records and HR workflows. | Not used. | Background |
 | **ERP** (enterprise resource planning) | Finance, procurement, and operations data live in disconnected systems. | Integrates core business processes in one system. | Not used. | Background |
-| **Ticketing system** (ITSM, IT service management) | Support requests get lost without tracking. | Records, routes, and tracks requests through resolution, as in ServiceNow. | See [proposed decision 7](plans/mvp-design.md#7-capability-coverage-additions). | Background |
+| **Ticketing system** (ITSM, IT service management) | Support requests get lost without tracking. | Records, routes, and tracks requests through resolution, as in ServiceNow. | A local mock ticketing API that an MCP tool files drafted tickets into. [Decision 7](plans/mvp-design.md#7-capability-coverage-additions) | Planned (M12, stretch) |
 | **No-code / low-code** | Non-programmers depend on developers for simple tools. | Lets people build applications through visual configuration instead of code. | Not used. | Background |
 | **Open source** | Closed code cannot be inspected, reused, or improved by others. | Publishes source under a license that permits use and modification. | This repository, under the MIT license. | Implemented |
 
