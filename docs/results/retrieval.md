@@ -2,7 +2,7 @@
 
 recall@5 over 36 standalone questions: keyword 0.81, vector 0.97, hybrid 1.00 (hybrid leads).
 
-Generated on 2026-11-03 at commit `e5b1de2+uncommitted`. The corpus has 247 documents and 1,978 chunks, embedded with `nomic-embed-text`. The golden set has 47 questions; the unanswerable ones have no target and are not scored here. Each mode retrieves the top 10 chunks, and a question counts as found when a chunk matching its expected target is among them. See [evaluation](../evaluation.md) for the metric definitions and the [retrieval runbook](../../runbooks/evaluate-retrieval.md) to repeat the run.
+Generated on 2026-11-03 at commit `c9723f8`. The corpus has 247 documents and 1,978 chunks, embedded with `nomic-embed-text`. The golden set has 47 questions; the unanswerable ones have no target and are not scored here. Each mode retrieves the top 10 chunks, and a question counts as found when a chunk matching its expected target is among them. See [evaluation](../evaluation.md) for the metric definitions and the [retrieval runbook](../../runbooks/evaluate-retrieval.md) to repeat the run.
 
 ## Recall and MRR by mode
 
@@ -48,9 +48,9 @@ Wall time per search on the local machine, from one pass after a warm-up query. 
 
 | Mode | Searches | Median ms | p95 ms | Median embedding ms |
 |---|---|---|---|---|
-| keyword | 40 | 45 | 86 | 0 |
-| vector | 40 | 46 | 53 | 34 |
-| hybrid | 40 | 96 | 146 | 34 |
+| keyword | 40 | 47 | 103 | 0 |
+| vector | 40 | 49 | 72 | 36 |
+| hybrid | 40 | 102 | 180 | 36 |
 
 ## HNSW recall
 
@@ -60,7 +60,7 @@ The HNSW index is approximate. This table measures the share of an exact scan's 
 |---|---|---|---|
 | HNSW, ef_search = 40 | 0.989 | 0.900 | 9 |
 | HNSW, ef_search = 100 | 0.998 | 0.900 | 10 |
-| Exact scan | 1.000 | 1.000 | 17 |
+| Exact scan | 1.000 | 1.000 | 16 |
 
 ## Example questions
 
