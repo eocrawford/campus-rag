@@ -5,7 +5,7 @@ options considered, the recommendation, and its status. Update the status when a
 
 | # | Decision | Choice | Status |
 |---|----------|--------|--------|
-| 1 | Model provider | OpenAI-compatible interface; start with GitHub Models | Decided 2026-11-03 |
+| 1 | Model provider | OpenAI-compatible interface; ~~start with GitHub Models~~ | Reopened 2026-11-03: GitHub Models was retired on 2026-07-30; provider choice moves to [decision 10](#10-m4-index-embeddings-and-keyword-search) |
 | 2 | Corpus | UW Policy Directory and UW-IT Connect, under the [terms constraints](../data-sources.md#uw-terms-of-use-constraints) | Decided 2026-11-03 |
 | 3 | Python tooling | uv | Decided 2026-11-03 |
 | 4 | Database access | psycopg 3 with plain SQL and numbered migrations | Decided 2026-11-03 |
@@ -14,6 +14,7 @@ options considered, the recommendation, and its status. Update the status when a
 | 7 | Capability coverage additions | Add usage analytics with user feedback (M11); mock ticketing-system tool as an optional stretch (M12) | Decided 2026-11-03 |
 | 8 | Installs on restricted networks | Opt-in `-PackageIndexUrl` mirror install with lock hashes enforced; `uv.lock` stays canonical | Decided 2026-11-03 |
 | 9 | M3 corpus pipeline | UW Policy Directory only; sitemap-driven selection; cached polite fetch; heading-aware extraction and chunking; documents and chunks in PostgreSQL; new `campus_rag.ingest` command | Decided 2026-11-03 |
+| 10 | M4 index: embeddings and keyword search | OpenAI `text-embedding-3-small` (1536 dimensions) through a configurable OpenAI-compatible client; per-model embeddings table with HNSW; weighted full-text index; embedding stage added to `campus_rag.ingest` | Proposed |
 
 ## 1. Model provider
 
@@ -193,3 +194,79 @@ replaced in one transaction; a document no longer selected is removed.
 A new entry point, `uv run python -m campus_rag.ingest`, runs selection, fetch, extraction,
 chunking, and storage, with `--limit N` for trial runs and `--dry-run` to report without writing.
 The repository's rules require the maintainer's consent for a new command.
+
+## 10. M4 index: embeddings and keyword search
+
+GitHub Models, the provider chosen in decision 1, was retired on 2026-07-30, so M4 must choose a
+new embedding provider. From this development network, `api.openai.com`, Google's Gemini API,
+Voyage AI, Cohere, Hugging Face, and Ollama are all reachable.
+
+The corpus has 1,978 chunks of 82-796 tokens (median 196), about 450,000 tokens in total. Any
+embedding choice must handle chunks up to 800 tokens, which the chunker counts with the
+`cl100k_base` tokenizer used by OpenAI embedding models.
+
+### 10a. Embedding provider and model
+
+| Option | Quality | Cost for the corpus | Tradeoffs |
+|--------|---------|---------------------|-----------|
+| **OpenAI `text-embedding-3-small`** (1536 dimensions) | Strong general retrieval quality | About $0.01 per full embed; queries are negligible | Paid account with a spending cap. 8,191-token input limit fits every chunk. Same tokenizer as the chunker. Supports shortening dimensions. |
+| OpenAI `text-embedding-3-large` (3072 dimensions) | Higher | About $0.06 per full embed | Exceeds pgvector's 2,000-dimension HNSW limit for `vector`; must be shortened or stored as `halfvec`. |
+| Local model through Ollama (for example `nomic-embed-text`, 768 dimensions) | Comparable to `-3-small` on many benchmarks | Free | Requires installing Ollama and pulling the model; slower on CPU; needs task prefixes (`search_query:` / `search_document:`); different tokenizer than the chunker. |
+| Local model through `sentence-transformers` | Varies | Free | Adds PyTorch (very large dependency); many small models truncate at 256-512 tokens, below the 800-token chunk maximum. |
+| Google Gemini, Voyage AI, or Cohere free tiers | Strong | Free within limits | Another account and API shape each; free-tier limits and terms change. |
+
+**Recommendation:** OpenAI `text-embedding-3-small` at its full 1,536 dimensions as the primary
+model, called through a small OpenAI-compatible client so the base URL, key, model, and
+dimensions are configuration. Add a local Ollama model later as a no-cost comparison in M6
+(see 10c). Set a monthly spending cap on the OpenAI account.
+
+The chat model for M7 is a separate decision; the same configuration shape will apply.
+
+### 10b. Configuration and client
+
+- Settings: `CAMPUS_RAG_EMBEDDING_BASE_URL` (default `https://api.openai.com/v1`),
+  `CAMPUS_RAG_EMBEDDING_API_KEY`, `CAMPUS_RAG_EMBEDDING_MODEL` (default `text-embedding-3-small`),
+  and `CAMPUS_RAG_EMBEDDING_DIMENSIONS` (default `1536`). Keys live in `.env` and are never logged.
+- Client: plain `httpx` against the `/embeddings` endpoint, which avoids adding the OpenAI SDK
+  and keeps requests visible. Batches of up to 128 chunks per request; retries with backoff on
+  timeouts, HTTP 429, and 5xx, honoring `Retry-After`.
+- Tests use a deterministic fake embedder and never call a paid API.
+
+### 10c. Storage schema
+
+| Option | Tradeoff |
+|--------|----------|
+| `embedding vector(1536)` column on `chunks` | Simplest; changing or comparing models requires a migration and a full re-embed. |
+| **`chunk_embeddings` table keyed by chunk and model** | Several models can coexist for side-by-side evaluation in M6. Each model gets a partial HNSW index on its rows with a fixed-dimension cast. |
+
+**Recommendation:** a `chunk_embeddings` table with `chunk_id` (cascade delete), `model`,
+`dimensions`, `content_hash` of the embedded chunk, `embedding vector`, and `embedded_at`;
+primary key (`chunk_id`, `model`). Migration `003` creates it and an HNSW index (cosine
+distance, `m = 16`, `ef_construction = 64`) for `text-embedding-3-small`. Index parameters and
+`ef_search` are tuned against recall in M6. At this corpus size an exact scan is also fast, which
+M6 can use as the recall baseline.
+
+### 10d. Embedding stage and re-embedding
+
+- Embed only chunks that have no embedding for the configured model, or whose stored
+  `content_hash` differs from the chunk's. A rerun with no changes makes no API calls.
+- Stored chunks are replaced when a document changes, and their embeddings cascade away with
+  them, so stale vectors cannot survive.
+- **Command:** extend the existing `campus_rag.ingest` command with an embedding stage after
+  storage rather than adding a new command, as the repository's rules prefer. `--no-embed`
+  skips it. When embedding is enabled and no API key is configured, the command fails before
+  fetching anything, with a message naming the missing setting.
+
+### 10e. Keyword index
+
+- Add a generated `tsvector` column to `chunks`: heading path weighted `A`, body weighted `B`,
+  using PostgreSQL's `english` configuration, with a GIN index (migration `003`).
+- Rank with `ts_rank_cd`. Stock PostgreSQL has no BM25; an extension such as ParadeDB's
+  `pg_search` could add it later but would replace the pgvector Docker image. M6 measures
+  whether keyword ranking quality limits hybrid results.
+
+### 10f. Data handling
+
+Sending public UW page text to the embedding API is processing, not redistribution: the API
+returns vectors that stay in the local database, and OpenAI does not train on API data by
+default. Document this in [data sources](../data-sources.md).
