@@ -12,7 +12,7 @@ options considered, the choice, and its status.
 | 5 | Package layout | Single `campus_rag` package organized by pipeline stage | Decided 2026-11-03 |
 | 6 | Test strategy | Fake-provider unit tests, marked database tests, explicit evaluation runs | Decided 2026-11-03 |
 | 7 | Capability coverage additions | Add usage analytics with user feedback (M11); mock ticketing-system tool as an optional stretch (M12) | Decided 2026-11-03 |
-| 8 | Installs on restricted networks | Opt-in `-PackageIndexUrl` mirror install with lock hashes enforced; `uv.lock` stays canonical | Decided 2026-11-03; 8b (switch to `uv_build`) Proposed |
+| 8 | Installs on restricted networks | Opt-in `-PackageIndexUrl` mirror install with lock hashes enforced; `uv.lock` stays canonical; `uv_build` backend so rebuilds need no download | Decided 2026-11-03 |
 | 9 | M3 corpus pipeline | UW Policy Directory only; sitemap-driven selection; cached polite fetch; heading-aware extraction and chunking; documents and chunks in PostgreSQL; new `campus_rag.ingest` command | Decided 2026-11-03 |
 | 10 | M4 index: embeddings and keyword search | Local embeddings with Ollama (`nomic-embed-text`, 768 dimensions) in Docker Compose through an OpenAI-compatible client; per-model embeddings table with HNSW; weighted full-text index; embedding stage in `campus_rag.ingest` | Decided 2026-11-03 |
 
@@ -107,25 +107,21 @@ intercepted.
 | Configure the mirror globally for uv | Makes uv treat the canonical lock as stale and rewrite it. |
 
 **Decision:** opt-in mirror install. Without the parameter, the setup script fails at step 4
-and prints the rerun command with the mirror detected from `pip config list`. The build backend
-(hatchling) used for the editable install comes from the mirror without a hash check because it
-is not pinned in `uv.lock`.
+and prints the rerun command with the mirror detected from `pip config list`.
 
-### 8b. Build backend (proposed)
+### 8b. Build backend
 
-On a restricted network, any change to `pyproject.toml` makes uv rebuild the editable project,
-which downloads hatchling from the blocked host, so every `uv run` fails until setup is rerun
-with `-PackageIndexUrl`.
+On a restricted network, a hatchling-built project must download hatchling from the blocked host
+whenever uv rebuilds the editable install, which happens after any `pyproject.toml` change, and
+hatchling arrives without a hash check because it is not pinned in `uv.lock`.
 
 | Option | Tradeoff |
 |--------|----------|
-| Keep hatchling | No change; restricted networks need a mirror rerun after every `pyproject.toml` change, and hatchling arrives without a hash check. |
+| Keep hatchling | Restricted networks need a mirror rerun after every `pyproject.toml` change, and the backend is installed unverified. |
 | **Switch to `uv_build`** (`requires = ["uv_build>=0.13.0,<0.14"]`) | uv builds the project itself with no download, so rebuilds work offline and nothing unverified is installed. The version range must be raised when the project moves to a new uv minor version; outside the range uv downloads `uv_build` like any other backend. |
 
-**Recommendation:** switch to `uv_build`. Verified in a scratch clone on the restricted network:
-the wheel builds offline and includes the migration `.sql` files, `uv lock --check` passes
-unchanged, and after a `pyproject.toml` change a plain `uv run` rebuilds and runs without the
-mirror.
+**Decision:** `uv_build`. The wheel builds offline and includes the migration `.sql` files, and
+after a `pyproject.toml` change a plain `uv run` rebuilds without the mirror.
 
 ## 9. M3 corpus pipeline
 
