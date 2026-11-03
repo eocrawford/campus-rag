@@ -13,7 +13,7 @@ options considered, the recommendation, and its status. Update the status when a
 | 6 | Test strategy | Fake-provider unit tests, marked database tests, explicit evaluation runs | Decided 2026-11-03 |
 | 7 | Capability coverage additions | Add usage analytics with user feedback (M11); mock ticketing-system tool as an optional stretch (M12) | Decided 2026-11-03 |
 | 8 | Installs on restricted networks | Opt-in `-PackageIndexUrl` mirror install with lock hashes enforced; `uv.lock` stays canonical | Decided 2026-11-03 |
-| 9 | M3 corpus pipeline | UW Policy Directory only; sitemap-driven selection; cached polite fetch; heading-aware extraction and chunking; documents and chunks in PostgreSQL | Proposed |
+| 9 | M3 corpus pipeline | UW Policy Directory only; sitemap-driven selection; cached polite fetch; heading-aware extraction and chunking; documents and chunks in PostgreSQL; new `campus_rag.ingest` command | Decided 2026-11-03 |
 
 ## 1. Model provider
 

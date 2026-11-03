@@ -1,0 +1,15 @@
+# Corpus selection rules. Only URLs and rules are committed; fetched content stays in data/.
+# See docs/data-sources.md for the allowlist and terms-of-use constraints.
+
+[[sources]]
+name = "uw-policy"
+sitemap_url = "https://policy.uw.edu/wp-sitemap.xml"
+# Policy documents live under /directory/ (APS, Presidential Orders, Regents Governance,
+# Student Governance and Policies, Faculty Code, Executive Orders).
+include_prefixes = ["https://policy.uw.edu/directory/"]
+# Regular expressions matched against the full URL.
+exclude_patterns = []
+# Pages with less body text than this (section index pages) are skipped.
+min_words = 150
+# Optional cap on pages per run; omit for no cap.
+# max_pages = 50

@@ -9,7 +9,7 @@ documents with citations, and demonstrates measurable gains from hybrid retrieva
 |---|-----------|-----------|--------|
 | 1 | Repository scaffolding | README, contributor guide, docs, and runbook structure published | Done |
 | 2 | Local environment | PostgreSQL with pgvector runs locally; Python project, lint, and tests run | Done: [setup runbook](../../runbooks/local-environment-setup.md) |
-| 3 | Corpus | Allowlisted sources selected and documented; about 50 pages ingested and chunked | Not started |
+| 3 | Corpus | UW Policy Directory pages selected by committed rules (about 300 pages) fetched, extracted, chunked, and stored | Not started |
 | 4 | Index | Chunks embedded and stored with keyword and vector indexes | Not started |
 | 5 | Golden set | 40 questions with expected passages, including unanswerable questions | Not started |
 | 6 | Retrieval | Keyword, vector, and hybrid (RRF) search with recall@5 and MRR reported for each | Not started |
