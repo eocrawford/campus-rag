@@ -12,6 +12,7 @@ options considered, the recommendation, and its status. Update the status when a
 | 5 | Package layout | Single `campus_rag` package organized by pipeline stage | Decided 2026-11-03 |
 | 6 | Test strategy | Fake-provider unit tests, marked database tests, explicit evaluation runs | Decided 2026-11-03 |
 | 7 | Capability coverage additions | Add usage analytics with user feedback; consider a mock ticketing-system tool | Proposed |
+| 8 | Installs on restricted networks | Opt-in `-PackageIndexUrl` mirror install with lock hashes enforced; `uv.lock` stays canonical | Proposed (implemented in M2 setup script) |
 
 ## 1. Model provider
 
@@ -92,3 +93,21 @@ cover the most valuable gaps at low cost:
 | Multi-agent orchestration (CrewAI or A2A) | Agent orchestration, agent-to-agent coordination | Large; adds frameworks without improving answer quality | Skip for MVP |
 | Fine-tuning | Model customization | Large; retrieval already supplies the domain knowledge | Skip |
 | No-code builder | Tools for non-technical users | Large; outside this project's purpose | Skip |
+
+## 8. Installs on restricted networks
+
+Some networks block `files.pythonhosted.org`, where PyPI serves package files, and require an
+internal package mirror instead. A plain `uv sync` then fails with a TLS handshake error; trusting
+the system certificate store (`--native-tls`) does not help because the host is blocked, not
+intercepted.
+
+| Option | Tradeoff |
+|--------|----------|
+| **Opt-in mirror install** (`-PackageIndexUrl`) | Installs the exact locked packages from a mirror with hashes from `uv.lock` enforced, then proves the environment matches the lock with `uv sync --locked --offline`. `uv.lock` keeps canonical PyPI URLs. Needs one extra parameter on restricted networks. |
+| Lock against the mirror | Simple on a restricted network, but writes private mirror URLs into a public lockfile and breaks installs everywhere else. |
+| Configure the mirror globally for uv | Makes uv treat the canonical lock as stale and rewrite it. |
+
+**Recommendation:** opt-in mirror install. Without the parameter, the setup script fails at step 4
+and prints the rerun command with the mirror detected from `pip config list`. The build backend
+(hatchling) used for the editable install comes from the mirror without a hash check because it
+is not pinned in `uv.lock`.

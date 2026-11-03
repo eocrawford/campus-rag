@@ -1,8 +1,10 @@
 ---
 language: python
 python-version: "3.12"
-lint: python -m ruff check src scripts
-test: python -m pytest
+setup: scripts/setup-local-environment.ps1
+lint: uv run ruff check src tests
+format: uv run ruff format --check src tests
+test: uv run pytest
 ---
 
 # campus-rag contributor guide
@@ -27,7 +29,9 @@ university documents with cited sources. This guide is for agents and humans mak
 
 ## File locations
 
-* Application source goes in `src/`.
+* Application source goes in `src/campus_rag/`. Database migrations go in
+  `src/campus_rag/index/migrations/` as `NNN_snake_name.sql`; never edit a migration after it merges.
+* Tests go in `tests/`. Mark tests that need the local database with `@pytest.mark.db`.
 * Repository entry-point scripts go in `scripts/`.
 * Documentation goes in `docs/`. Update the table of contents in [`docs/AGENTS.md`](docs/AGENTS.md)
   when adding a topic.
@@ -43,12 +47,22 @@ university documents with cited sources. This guide is for agents and humans mak
 
 ## Validation
 
+Set up the environment once with
+[local environment setup](runbooks/local-environment-setup.md):
+
+```powershell
+.\scripts\setup-local-environment.ps1
+```
+
 Run lint and tests before publishing a change:
 
 ```powershell
-python -m ruff check src scripts
-python -m pytest
+uv run ruff check src tests
+uv run ruff format --check src tests
+uv run pytest
 ```
+
+Never run `uv lock` with a package mirror configured; `uv.lock` must keep its canonical PyPI URLs.
 
 ## Commit trailer
 

@@ -4,8 +4,9 @@ campus-rag answers questions about public university policy and IT documentation
 It retrieves relevant passages, grounds an LLM answer in those passages, and declines to answer when
 the sources do not support one.
 
-> **Status: scaffolding.** This repository currently contains documentation and structure only.
-> Features below describe the planned design; see [the MVP plan](docs/plans/mvp.md) for progress.
+> **Status: early development.** The local environment (Python, PostgreSQL with pgvector, and
+> database migrations) is in place. Retrieval and answering features below describe the planned
+> design; see [the MVP plan](docs/plans/mvp.md) for progress.
 
 ## Why
 
@@ -32,11 +33,25 @@ Question -> rewrite -> hybrid search (keyword + vector) -> rerank -> grounded an
 
 See [architecture](docs/architecture.md) for design details and tradeoffs.
 
+## Quick start
+
+Prerequisites: Windows, Git, [uv](https://docs.astral.sh/uv/), and Docker Desktop. Then, from the
+repository root:
+
+```powershell
+.\scripts\setup-local-environment.ps1
+```
+
+The script installs Python and dependencies, starts PostgreSQL with pgvector, applies migrations,
+and runs the tests. See [local environment setup](runbooks/local-environment-setup.md) for options
+and troubleshooting.
+
 ## Repository layout
 
 | Path | Contents |
 |------|----------|
-| `src/` | Application source code. |
+| `src/` | Application source code (`campus_rag` package). |
+| `tests/` | Unit tests and database tests. |
 | `scripts/` | Repository entry-point scripts for ingestion, evaluation, and local setup. |
 | `docs/` | Architecture, evaluation, data-source policy, and contributor guidance. |
 | `runbooks/` | Repeatable operational procedures. |
