@@ -24,7 +24,7 @@ class RetrievedChunk:
     heading_path: str
     content: str  # starts with the heading path line
     token_count: int
-    score: float  # higher is better: RRF score, ts_rank_cd, or 1 - cosine distance
+    score: float  # higher is better: RRF score, BM25 score, or 1 - cosine distance
     rank: int  # 1-based position in the returned list
     keyword_rank: int | None = None  # 1-based rank in the keyword list, if it appeared there
     vector_rank: int | None = None  # 1-based rank in the vector list, if it appeared there

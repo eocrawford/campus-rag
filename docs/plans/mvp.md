@@ -11,9 +11,9 @@ documents with citations, and demonstrates measurable gains from hybrid retrieva
 | 2 | Local environment | PostgreSQL with pgvector runs locally; Python project, lint, and tests run | Done: [setup runbook](../../runbooks/local-environment-setup.md) |
 | 3 | Corpus | UW Policy Directory pages selected by committed rules (about 300 pages) fetched, extracted, chunked, and stored | Done: 247 documents, 1,978 chunks ([ingestion runbook](../../runbooks/ingest-corpus.md)) |
 | 4 | Index | Chunks embedded and stored with keyword and vector indexes | Done: 1,978 `nomic-embed-text` embeddings with HNSW and full-text indexes ([decision 10](mvp-design.md#10-m4-index-embeddings-and-keyword-search)) |
-| 5 | Golden set | 40 questions with expected passages, including unanswerable questions | Not started |
-| 6 | Retrieval | Keyword, vector, and hybrid (RRF) search with recall@5 and MRR reported for each | Not started |
-| 7 | Grounded answers | Answers cite passages, citations are validated, and unsupported questions are declined | Not started |
+| 5 | Golden set | 40 questions with expected passages, including unanswerable questions | Done: 47 questions ([evaluation](../evaluation.md#golden-set)) |
+| 6 | Retrieval | Keyword, vector, and hybrid (RRF) search with recall@5 and MRR reported for each | Done: hybrid recall@5 1.00 ([results](../results/retrieval.md)) |
+| 7 | Grounded answers | Answers cite passages, citations are validated, and unsupported questions are declined | Done ([ask runbook](../../runbooks/ask-questions.md)) |
 | 8 | Answer evaluation | Faithfulness, relevance, and refusal metrics reported with an independent judge | Not started |
 | 9 | Interfaces | FastAPI `search` and `answer` endpoints; MCP `search` tool | Not started |
 | 10 | Write-up | README results table and a short case study of findings | Not started |

@@ -4,10 +4,11 @@ campus-rag answers questions about public university policy documents with cited
 retrieves relevant passages, grounds an LLM answer in those passages, and declines to answer when
 the sources do not support one.
 
-> **Status: early development.** Corpus ingestion and indexing work: 247 UW Policy Directory
-> documents are fetched politely, split into 1,978 heading-aware chunks, embedded locally with
-> Ollama, and indexed for keyword and vector search in PostgreSQL. Retrieval and answering are
-> planned; see [the MVP plan](docs/plans/mvp.md) for progress.
+> **Status: early development.** The full question-answering pipeline works locally: 247 UW
+> Policy Directory documents are split into 1,978 chunks, embedded with Ollama, and searched with
+> hybrid keyword (BM25) and vector retrieval; a local LLM answers with validated citations or
+> declines. The API, MCP server, and evaluation write-up are in progress; see
+> [the MVP plan](docs/plans/mvp.md).
 
 ## Why
 

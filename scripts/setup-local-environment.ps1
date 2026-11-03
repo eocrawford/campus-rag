@@ -5,8 +5,8 @@ Sets up the campus-rag local development environment and verifies it.
 .DESCRIPTION
 Checks prerequisites, starts the Docker engine if needed, creates .env from
 .env.example, installs Python and dependencies with uv, starts PostgreSQL with
-pgvector and the Ollama embedding model server in Docker, pulls and checks the
-embedding model, applies database migrations, and runs the test suite.
+pgvector and the Ollama model server in Docker, pulls and checks the embedding
+and chat models, applies database migrations, and runs the test suite.
 
 Each step prints a numbered header and finishes with OK or FAILED. On failure
 the script prints the step, the reason, and the command that fixes it, then
@@ -21,7 +21,7 @@ Steps and exit codes:
   3  Environment file (.env)
   4  Python environment (uv sync --locked)
   5  Database container (docker compose up -d --wait db)
-  6  Model server (docker compose up -d --wait ollama, model pull, embedding check)
+  6  Model server (docker compose up -d --wait ollama, model pulls, embedding and chat checks)
   7  Migrations (uv run python -m campus_rag.index.migrate)
   8  Verification (uv run pytest with CAMPUS_RAG_REQUIRE_DB=1)
 
@@ -34,7 +34,13 @@ the migrations. All local database data is lost. Pulled embedding models are
 kept.
 
 .PARAMETER SkipModelServer
-Skips step 6 (the Ollama model server). Commands that embed text fail until
+Skips step 6 (the Ollama model server). Commands that embed text or call chat
+models fail until the script runs without this switch.
+
+.PARAMETER SkipChatModels
+Skips pulling and checking the chat models (answer, rewrite, and judge) in
+step 6; the embedding model is still pulled and checked. Use it when you only
+need ingestion. The ask, evaluate, and api commands fail with exit code 7 until
 the script runs without this switch.
 
 .PARAMETER SkipTests
@@ -55,6 +61,11 @@ Credentials in the URL are never printed.
 .\scripts\setup-local-environment.ps1
 
 Sets up the environment and runs the tests.
+
+.EXAMPLE
+.\scripts\setup-local-environment.ps1 -SkipChatModels
+
+Sets up everything ingestion needs and skips the chat models, saving about 11.5 GB of downloads.
 
 .EXAMPLE
 .\scripts\setup-local-environment.ps1 -SkipTests
@@ -79,6 +90,7 @@ rights. Exit code 0 means success; exit codes 1-8 identify the failed step.
 param(
     [switch]$ResetDatabase,
     [switch]$SkipModelServer,
+    [switch]$SkipChatModels,
     [switch]$SkipTests,
     [ValidateRange(0, 3600)]
     [int]$DockerStartTimeoutSeconds = 180,
@@ -98,6 +110,18 @@ $DefaultEmbeddingBaseUrl = 'http://127.0.0.1:11434/v1'
 $DefaultEmbeddingModel = 'nomic-embed-text'
 $DefaultEmbeddingDimensions = 768
 $DefaultDocumentPrefix = 'search_document: '
+$DefaultChatBaseUrl = 'http://127.0.0.1:11434/v1'
+$DefaultAnswerModel = 'qwen2.5:7b-instruct'
+$DefaultRewriteModel = 'qwen2.5:3b-instruct'
+$DefaultJudgeModel = 'llama3.1:8b'
+$DefaultChatTimeoutSeconds = 300
+# Approximate download sizes of the default models, shown before a pull.
+$KnownModelSizes = @{
+    'nomic-embed-text'    = '275 MB'
+    'qwen2.5:7b-instruct' = '4.7 GB'
+    'qwen2.5:3b-instruct' = '1.9 GB'
+    'llama3.1:8b'         = '4.9 GB'
+}
 # uv output that means the network blocks the default package host.
 $NetworkFailurePattern = 'HandshakeFailure|SEC_E_|client error \(Connect\)|error sending request|files\.pythonhosted\.org'
 $ScriptTimer = [System.Diagnostics.Stopwatch]::StartNew()
@@ -107,6 +131,7 @@ $script:UvExe = $null
 $script:DockerExe = $null
 $script:DbConfig = $null
 $script:ModelConfig = $null
+$script:ChatConfig = $null
 
 function New-StepFailure {
     param(
@@ -447,6 +472,38 @@ function Invoke-Step3EnvironmentFile {
     }
     Write-Detail "Model server port: $ollamaPortNumber (from $($ollamaPort.Source))"
     Write-Detail "Embeddings: $displayBaseUrl, model $($model.Value), $dimensionsNumber dimensions"
+
+    $chatBaseUrl = Get-ConfigValue -DotEnv $dotEnv -Name 'CAMPUS_RAG_CHAT_BASE_URL' -Default $DefaultChatBaseUrl
+    $answerModel = Get-ConfigValue -DotEnv $dotEnv -Name 'CAMPUS_RAG_CHAT_ANSWER_MODEL' -Default $DefaultAnswerModel
+    $rewriteModel = Get-ConfigValue -DotEnv $dotEnv -Name 'CAMPUS_RAG_CHAT_REWRITE_MODEL' -Default $DefaultRewriteModel
+    $judgeModel = Get-ConfigValue -DotEnv $dotEnv -Name 'CAMPUS_RAG_CHAT_JUDGE_MODEL' -Default $DefaultJudgeModel
+    $chatTimeout = Get-ConfigValue -DotEnv $dotEnv -Name 'CAMPUS_RAG_CHAT_TIMEOUT_SECONDS' -Default ([string]$DefaultChatTimeoutSeconds)
+    $chatApiKey = Get-ConfigValue -DotEnv $dotEnv -Name 'CAMPUS_RAG_CHAT_API_KEY' -Default ''
+
+    $chatBaseUrlText = $chatBaseUrl.Value.Trim().TrimEnd('/')
+    $chatUri = $null
+    if (-not [System.Uri]::TryCreate($chatBaseUrlText, [System.UriKind]::Absolute, [ref]$chatUri) -or ($chatUri.Scheme -ne 'http' -and $chatUri.Scheme -ne 'https')) {
+        throw (New-StepFailure -Reason "CAMPUS_RAG_CHAT_BASE_URL is '$(Get-RedactedText $chatBaseUrlText)' (from $($chatBaseUrl.Source)); it must be an http or https URL." -Fix "Set CAMPUS_RAG_CHAT_BASE_URL=$DefaultChatBaseUrl in .env")
+    }
+    $timeoutSeconds = 0.0
+    if (-not [double]::TryParse($chatTimeout.Value, [System.Globalization.NumberStyles]::Float, [System.Globalization.CultureInfo]::InvariantCulture, [ref]$timeoutSeconds) -or $timeoutSeconds -le 0) {
+        throw (New-StepFailure -Reason "CAMPUS_RAG_CHAT_TIMEOUT_SECONDS is '$($chatTimeout.Value)' (from $($chatTimeout.Source)); it must be a positive number." -Fix "Set CAMPUS_RAG_CHAT_TIMEOUT_SECONDS=$DefaultChatTimeoutSeconds in .env")
+    }
+    $chatDisplayBaseUrl = Get-RedactedText $chatBaseUrlText
+    if ($chatUri.IsLoopback -and $chatUri.Port -ne $ollamaPortNumber) {
+        Write-Note "CAMPUS_RAG_CHAT_BASE_URL uses port $($chatUri.Port), but the Ollama container publishes port $ollamaPortNumber (CAMPUS_RAG_OLLAMA_PORT). Make them match."
+    }
+    $script:ChatConfig = New-Object PSObject -Property @{
+        BaseUrl        = $chatBaseUrlText
+        DisplayBaseUrl = $chatDisplayBaseUrl
+        IsLocal        = $chatUri.IsLoopback
+        AnswerModel    = $answerModel.Value
+        RewriteModel   = $rewriteModel.Value
+        JudgeModel     = $judgeModel.Value
+        TimeoutSeconds = [int][Math]::Ceiling($timeoutSeconds)
+        ApiKey         = $chatApiKey.Value
+    }
+    Write-Detail "Chat: $chatDisplayBaseUrl, answer $($answerModel.Value), rewrite $($rewriteModel.Value), judge $($judgeModel.Value)"
 }
 
 function Assert-UsableLockFile {
@@ -757,37 +814,38 @@ function Invoke-OllamaPull {
     }
 }
 
-function Test-EmbeddingEndpoint {
-    # Embeds one prefixed sample text and checks the vector size.
-    $config = $script:ModelConfig
-    $url = "$($config.BaseUrl)/embeddings"
-    $displayUrl = "$($config.DisplayBaseUrl)/embeddings"
-    $sample = "$($config.DocumentPrefix)The campus library is open until midnight during finals week."
-    $body = [System.Text.Encoding]::UTF8.GetBytes((@{ model = $config.Model; input = @($sample) } | ConvertTo-Json -Compress))
+function Invoke-JsonPost {
+    # POSTs JSON to an OpenAI-compatible endpoint and returns the parsed response. Failures become
+    # step failures that name the endpoint without credentials. The API key is never printed.
+    param(
+        [Parameter(Mandatory = $true)][string]$Url,
+        [Parameter(Mandatory = $true)][string]$DisplayUrl,
+        [Parameter(Mandatory = $true)][string]$Kind,
+        [Parameter(Mandatory = $true)][hashtable]$Payload,
+        [string]$ApiKey,
+        [bool]$IsLocal,
+        [int]$TimeoutSeconds = 120,
+        [Parameter(Mandatory = $true)][string]$ReachFix,
+        [string]$TimeoutFix
+    )
     $headers = @{}
-    if ($config.ApiKey) {
-        $headers['Authorization'] = "Bearer $($config.ApiKey)"
+    if ($ApiKey) {
+        $headers['Authorization'] = 'Bearer ' + $ApiKey
     }
     $request = @{
-        Uri         = $url
+        Uri         = $Url
         Method      = 'Post'
         ContentType = 'application/json'
-        Body        = $body
+        Body        = [System.Text.Encoding]::UTF8.GetBytes(($Payload | ConvertTo-Json -Compress -Depth 5))
         Headers     = $headers
-        TimeoutSec  = 120
+        TimeoutSec  = $TimeoutSeconds
         ErrorAction = 'Stop'
     }
-    if ($config.IsLocal -and $PSVersionTable.PSVersion.Major -ge 7) {
+    if ($IsLocal -and $PSVersionTable.PSVersion.Major -ge 7) {
         $request['NoProxy'] = $true
     }
-
-    $reachFix = 'docker compose ps ollama   (it should show "healthy"); make sure the port in CAMPUS_RAG_EMBEDDING_BASE_URL matches CAMPUS_RAG_OLLAMA_PORT in .env, then rerun'
-    if (-not $config.IsLocal) {
-        $reachFix = 'Check CAMPUS_RAG_EMBEDDING_BASE_URL, CAMPUS_RAG_EMBEDDING_MODEL, and CAMPUS_RAG_EMBEDDING_API_KEY in .env, then rerun'
-    }
-    $timer = [System.Diagnostics.Stopwatch]::StartNew()
     try {
-        $response = Invoke-RestMethod @request
+        return Invoke-RestMethod @request
     }
     catch {
         $status = $null
@@ -808,11 +866,30 @@ function Test-EmbeddingEndpoint {
         if ($detail.Length -gt 300) {
             $detail = $detail.Substring(0, 300) + '...'
         }
-        if ($status) {
-            throw (New-StepFailure -Reason "the embeddings endpoint $displayUrl returned HTTP ${status}: $detail" -Fix $reachFix)
+        if ($detail -match '(?i)more system memory') {
+            throw (New-StepFailure -Reason "the $Kind endpoint $DisplayUrl reports that the model needs more memory than Docker has: $detail" -Fix 'Give Docker more memory (Docker Desktop Settings > Resources, or memory= in %UserProfile%\.wslconfig for the WSL 2 backend), then rerun')
         }
-        throw (New-StepFailure -Reason "cannot reach the embeddings endpoint $displayUrl ($detail)." -Fix $reachFix)
+        if ($status) {
+            throw (New-StepFailure -Reason "the $Kind endpoint $DisplayUrl returned HTTP ${status}: $detail" -Fix $ReachFix)
+        }
+        if ($TimeoutFix -and $detail -match '(?i)timed out|timeout') {
+            throw (New-StepFailure -Reason "the $Kind endpoint $DisplayUrl did not respond within $TimeoutSeconds seconds." -Fix $TimeoutFix)
+        }
+        throw (New-StepFailure -Reason "cannot reach the $Kind endpoint $DisplayUrl ($detail)." -Fix $ReachFix)
     }
+}
+
+function Test-EmbeddingEndpoint {
+    # Embeds one prefixed sample text and checks the vector size.
+    $config = $script:ModelConfig
+    $displayUrl = "$($config.DisplayBaseUrl)/embeddings"
+    $sample = "$($config.DocumentPrefix)The campus library is open until midnight during finals week."
+    $reachFix = 'docker compose ps ollama   (it should show "healthy"); make sure the port in CAMPUS_RAG_EMBEDDING_BASE_URL matches CAMPUS_RAG_OLLAMA_PORT in .env, then rerun'
+    if (-not $config.IsLocal) {
+        $reachFix = 'Check CAMPUS_RAG_EMBEDDING_BASE_URL, CAMPUS_RAG_EMBEDDING_MODEL, and CAMPUS_RAG_EMBEDDING_API_KEY in .env, then rerun'
+    }
+    $timer = [System.Diagnostics.Stopwatch]::StartNew()
+    $response = Invoke-JsonPost -Url "$($config.BaseUrl)/embeddings" -DisplayUrl $displayUrl -Kind 'embeddings' -Payload @{ model = $config.Model; input = @($sample) } -ApiKey $config.ApiKey -IsLocal $config.IsLocal -TimeoutSeconds 120 -ReachFix $reachFix
 
     $vector = $null
     if ($response -and $response.PSObject.Properties['data'] -and @($response.data).Count -gt 0) {
@@ -830,15 +907,84 @@ function Test-EmbeddingEndpoint {
     Write-Detail ('Embedding check passed: {0} returned {1} dimensions in {2:N1}s.' -f $config.Model, $vector.Count, $timer.Elapsed.TotalSeconds)
 }
 
+function Test-ChatEndpoint {
+    # Requests a tiny chat completion from the answer model.
+    $chat = $script:ChatConfig
+    $displayUrl = "$($chat.DisplayBaseUrl)/chat/completions"
+    $reachFix = 'docker compose ps ollama   (it should show "healthy"); make sure the port in CAMPUS_RAG_CHAT_BASE_URL matches CAMPUS_RAG_OLLAMA_PORT in .env, then rerun'
+    if (-not $chat.IsLocal) {
+        $reachFix = 'Check CAMPUS_RAG_CHAT_BASE_URL, CAMPUS_RAG_CHAT_ANSWER_MODEL, and CAMPUS_RAG_CHAT_API_KEY in .env, then rerun'
+    }
+    $timeoutFix = "Raise CAMPUS_RAG_CHAT_TIMEOUT_SECONDS in .env (now $($chat.TimeoutSeconds)), or give Docker more CPU and memory, then rerun"
+    $payload = @{
+        model       = $chat.AnswerModel
+        messages    = @(@{ role = 'user'; content = 'Reply with the single word OK.' })
+        max_tokens  = 5
+        temperature = 0
+    }
+    Write-Detail "Checking chat completions with $($chat.AnswerModel) (loading the model can take a minute)..."
+    $timer = [System.Diagnostics.Stopwatch]::StartNew()
+    $response = Invoke-JsonPost -Url "$($chat.BaseUrl)/chat/completions" -DisplayUrl $displayUrl -Kind 'chat' -Payload $payload -ApiKey $chat.ApiKey -IsLocal $chat.IsLocal -TimeoutSeconds $chat.TimeoutSeconds -ReachFix $reachFix -TimeoutFix $timeoutFix
+
+    $content = $null
+    if ($response -and $response.PSObject.Properties['choices'] -and @($response.choices).Count -gt 0) {
+        $choice = @($response.choices)[0]
+        if ($choice.PSObject.Properties['message'] -and $choice.message -and $choice.message.PSObject.Properties['content']) {
+            $content = [string]$choice.message.content
+        }
+    }
+    if ($null -eq $content) {
+        throw (New-StepFailure -Reason "the chat endpoint $displayUrl returned no message." -Fix $reachFix)
+    }
+    $reply = (($content -replace '[^\x20-\x7E]', ' ') -replace '\s+', ' ').Trim()
+    if ($reply.Length -gt 40) {
+        $reply = $reply.Substring(0, 40) + '...'
+    }
+    Write-Detail ('Chat check passed: {0} replied "{1}" in {2:N1}s.' -f $chat.AnswerModel, $reply, $timer.Elapsed.TotalSeconds)
+}
+
+function Add-ModelRequirement {
+    # Adds a model to the pull list, merging duplicates ('name' and 'name:latest' are the same model).
+    param(
+        [Parameter(Mandatory = $true)]$List,
+        [Parameter(Mandatory = $true)][string]$Model,
+        [Parameter(Mandatory = $true)][string]$Setting
+    )
+    $key = $Model.ToLowerInvariant()
+    if ($key -notmatch ':') {
+        $key = "${key}:latest"
+    }
+    foreach ($entry in $List) {
+        if ($entry.Key -eq $key) {
+            $entry.Settings = @($entry.Settings) + $Setting
+            return
+        }
+    }
+    $List.Add((New-Object PSObject -Property @{ Key = $key; Model = $Model; Settings = @($Setting) }))
+}
+
 function Invoke-Step6ModelServer {
     if ($SkipModelServer) {
-        Write-Detail 'Skipped (-SkipModelServer). Commands that embed text fail until you rerun without -SkipModelServer.'
+        Write-Detail 'Skipped (-SkipModelServer). Commands that embed text or call chat models fail until you rerun without -SkipModelServer.'
         return
     }
     $config = $script:ModelConfig
+    $chat = $script:ChatConfig
+    $checkChat = -not $SkipChatModels
+
+    $required = New-Object System.Collections.Generic.List[object]
     if ($config.IsLocal) {
+        Add-ModelRequirement -List $required -Model $config.Model -Setting 'CAMPUS_RAG_EMBEDDING_MODEL'
+    }
+    if ($checkChat -and $chat.IsLocal) {
+        Add-ModelRequirement -List $required -Model $chat.AnswerModel -Setting 'CAMPUS_RAG_CHAT_ANSWER_MODEL'
+        Add-ModelRequirement -List $required -Model $chat.RewriteModel -Setting 'CAMPUS_RAG_CHAT_REWRITE_MODEL'
+        Add-ModelRequirement -List $required -Model $chat.JudgeModel -Setting 'CAMPUS_RAG_CHAT_JUDGE_MODEL'
+    }
+
+    if ($required.Count -gt 0) {
         $port = $config.OllamaPort
-        $portFix = 'set CAMPUS_RAG_OLLAMA_PORT to a free port (for example 11436) in .env and use the same port in CAMPUS_RAG_EMBEDDING_BASE_URL'
+        $portFix = 'set CAMPUS_RAG_OLLAMA_PORT to a free port (for example 11436) in .env and use the same port in CAMPUS_RAG_EMBEDDING_BASE_URL and CAMPUS_RAG_CHAT_BASE_URL'
         Assert-ServicePortFree -Service 'ollama' -Port $port -PortFix $portFix
         Start-ComposeService -Service 'ollama' -Description 'model server' -Port $port -PortFix ($portFix.Substring(0, 1).ToUpper() + $portFix.Substring(1)) -HealthFix 'docker compose logs ollama   (read the error, then rerun)'
         Write-Detail "Model server is healthy on 127.0.0.1:$port."
@@ -847,29 +993,46 @@ function Invoke-Step6ModelServer {
         if ($list.ExitCode -ne 0) {
             throw (New-StepFailure -Reason "'ollama list' failed with exit code $($list.ExitCode): $(Get-LastLine $list.Output)" -Fix 'docker compose logs ollama   (read the error, then rerun)')
         }
-        if (Test-ModelListed -ListOutput $list.Output -Model $config.Model) {
-            Write-Detail "Model $($config.Model) is already pulled."
+        $present = @($required | Where-Object { Test-ModelListed -ListOutput $list.Output -Model $_.Model })
+        $missing = @($required | Where-Object { -not (Test-ModelListed -ListOutput $list.Output -Model $_.Model) })
+        if ($present.Count -gt 0) {
+            Write-Detail "Already pulled: $(($present | ForEach-Object { $_.Model }) -join ', ')"
         }
-        else {
-            $sizeNote = ''
-            if ($config.Model -match '^nomic-embed-text(:latest)?$') {
-                $sizeNote = ' (about 275 MB)'
-            }
-            Write-Detail "Pulling model $($config.Model)$sizeNote..."
-            $pullError = Invoke-OllamaPull -Port $port -Model $config.Model
-            if ($pullError) {
-                $pullError = Get-RedactedText $pullError
-                if ($pullError -match '(?i)file does not exist|not found|manifest unknown') {
-                    throw (New-StepFailure -Reason "model $($config.Model) was not found in the Ollama library ($pullError)." -Fix "Check CAMPUS_RAG_EMBEDDING_MODEL in .env (default: $DefaultEmbeddingModel), then rerun")
+        if ($missing.Count -gt 0) {
+            $names = ($missing | ForEach-Object {
+                    $size = $KnownModelSizes[($_.Key -replace ':latest$', '')]
+                    if ($size) { "$($_.Model) ($size)" } else { $_.Model }
+                }) -join ', '
+            Write-Detail "Pulling $($missing.Count) missing model(s): $names"
+            Write-Detail 'The default models total about 12 GB; the first download can take a while. Later runs reuse them.'
+            foreach ($entry in $missing) {
+                Write-Detail "Pulling model $($entry.Model)..."
+                $pullError = Invoke-OllamaPull -Port $port -Model $entry.Model
+                if ($pullError) {
+                    $pullError = Get-RedactedText $pullError
+                    $settings = (@($entry.Settings) | Sort-Object -Unique) -join ' and '
+                    if ($pullError -match '(?i)file does not exist|not found|manifest unknown') {
+                        throw (New-StepFailure -Reason "model $($entry.Model) was not found in the Ollama library ($pullError)." -Fix "Check $settings in .env, then rerun")
+                    }
+                    throw (New-StepFailure -Reason "could not pull model $($entry.Model): $pullError" -Fix "Check access to registry.ollama.ai and free disk space for Docker, then rerun. To pull by hand: docker compose exec ollama ollama pull $($entry.Model)")
                 }
-                throw (New-StepFailure -Reason "could not pull model $($config.Model): $pullError" -Fix "Check access to registry.ollama.ai, then rerun. To pull by hand: docker compose exec ollama ollama pull $($config.Model)")
             }
         }
     }
-    else {
-        Write-Detail "CAMPUS_RAG_EMBEDDING_BASE_URL points to a remote provider ($($config.DisplayBaseUrl)); the local Ollama container is not started."
+
+    if (-not $config.IsLocal) {
+        Write-Detail "CAMPUS_RAG_EMBEDDING_BASE_URL points to a remote provider ($($config.DisplayBaseUrl)); no embedding model is pulled."
     }
     Test-EmbeddingEndpoint
+
+    if (-not $checkChat) {
+        Write-Detail 'Chat models skipped (-SkipChatModels). The ask, evaluate, and api commands fail with exit code 7 until you rerun without -SkipChatModels.'
+        return
+    }
+    if (-not $chat.IsLocal) {
+        Write-Detail "CAMPUS_RAG_CHAT_BASE_URL points to a remote provider ($($chat.DisplayBaseUrl)); no chat models are pulled."
+    }
+    Test-ChatEndpoint
 }
 
 function Invoke-Step7Migrations {
@@ -985,6 +1148,15 @@ try {
             $embeddingText = "$embeddingText (not checked: -SkipModelServer)"
         }
         Write-Host "  Embeddings: $embeddingText"
+        $chat = $script:ChatConfig
+        $chatText = "$($chat.DisplayBaseUrl), answer $($chat.AnswerModel), rewrite $($chat.RewriteModel), judge $($chat.JudgeModel)"
+        if ($SkipModelServer) {
+            $chatText = "$chatText (not checked: -SkipModelServer)"
+        }
+        elseif ($SkipChatModels) {
+            $chatText = "$chatText (not checked: -SkipChatModels)"
+        }
+        Write-Host "  Chat:       $chatText"
         Write-Host "  Python:     $pythonText"
         Write-Host "  Tests:      $testsText"
         Write-Host '  Stop:       docker compose stop db ollama'

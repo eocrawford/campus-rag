@@ -258,8 +258,8 @@ A `chunk_embeddings` table keyed by (`chunk_id`, `model`) with `dimensions`, the
 chunk's `content_hash`, `embedding vector`, and `embedded_at`; chunk deletion cascades.
 Several models can coexist for side-by-side evaluation in M6. Migration `003` creates the table
 and a partial HNSW index (cosine distance, `m = 16`, `ef_construction = 64`) over
-`embedding::vector(768)` for `nomic-embed-text`. Index parameters and `ef_search` are tuned in
-M6, where an exact scan provides the recall baseline.
+`embedding::vector(768)` for `nomic-embed-text`. M6 kept these parameters after measuring recall
+against an exact scan (see the [retrieval results](../results/retrieval.md)).
 
 ### 10e. Embedding stage and re-embedding
 
@@ -274,8 +274,9 @@ M6, where an exact scan provides the recall baseline.
 
 - A generated `search_tsv` column on `chunks`: heading path weighted `A`, body weighted `B`, with
   PostgreSQL's `english` configuration and a GIN index (migration `003`).
-- Ranking uses `ts_rank_cd`. Stock PostgreSQL has no BM25; M6 measures whether keyword ranking
-  limits hybrid results.
+- Ranking started as `ts_rank_cd`. Stock PostgreSQL has no BM25 function, and M6 found that
+  `ts_rank_cd` limits hybrid results because it has no inverse document frequency; keyword search
+  now computes BM25 in SQL ([decision 11b](#11b-search)).
 
 ### 10g. Answer generation (M7)
 
@@ -305,10 +306,19 @@ recorded here before implementation. Each is backed by the measurements cited.
 
 ### 11b. Search
 
-- **Keyword:** the question's stemmed lexemes from `plainto_tsquery('english', ...)` joined with OR,
-  ranked by `ts_rank_cd` over the weighted `search_tsv`. AND matching (`websearch_to_tsquery`)
-  returned nothing for natural-language questions in M4 because every word must match.
-- **Vector:** cosine distance through the HNSW index with `hnsw.ef_search = 100`.
+- **Keyword:** the question's stemmed lexemes (from `to_tsvector('english', ...)`, so stop words
+  drop out) joined with OR, ranked by BM25 computed in SQL over the weighted `search_tsv`
+  (`k1 = 1.2`, `b = 0.75`, a heading occurrence counting 2.5 times a body occurrence, the ratio of
+  the A and B weights `ts_rank_cd` uses by default). AND matching (`websearch_to_tsquery`)
+  returned nothing for natural-language questions in M4 because every word must match. The first
+  design ranked OR matches with `ts_rank_cd`; its recall@5 was 0.39 against 0.81 for BM25 on the
+  golden set, because it has no inverse document frequency and scores "university" like a rare
+  word. BM25 was adopted after that measurement with its textbook constants and no parameter
+  search; both rankings stay in the code and the results compare them.
+- **Vector:** cosine distance through the HNSW index with `hnsw.ef_search = 100` and
+  `hnsw.iterative_scan = relaxed_order`, so filters still return enough rows. Sequential scans are
+  disabled for the statement: at this corpus size the planner would otherwise choose an exact scan
+  and the index would go unmeasured.
 - **Hybrid:** the top 50 of each list fused with reciprocal rank fusion, `k = 60`.
 - **Filters:** by source and URL prefix.
 - **Reranking:** not in the MVP. No local cross-encoder runs without adding PyTorch, and LLM
@@ -347,8 +357,19 @@ are never silently truncated. Models are configuration (`CAMPUS_RAG_CHAT_*`).
 - The model must cite passage numbers for each claim, keep answers under 150 words, and reply with a
   fixed refusal sentence when the passages lack the answer.
 - Code removes citations to passages that were not supplied. An answer left with no valid citation
-  becomes a refusal, so no uncited claim reaches the user.
-- `uv run python -m campus_rag.ask "<question>"` answers from the command line.
+  becomes a refusal, so no answer without a source reaches the user. An answer with at least one
+  valid citation is kept even if a sentence lacks its own marker; M8 measures how often that
+  happens.
+- **Plain text, not JSON output.** Measured with the 7B model on four hand-written questions,
+  plain text cited 5 of 5 sentences; a JSON schema (`answer`, `refused`) cited 5 of 7, produced
+  longer answers, and added about 51 prompt tokens. Both refused the unanswerable question.
+- **Follow-up rewriting** sends only the earlier user questions, not the assistant's answers. With
+  answers included, the 3B model returned follow-ups unchanged; without them it resolved all four
+  test cases, including leaving a new-topic question as typed. Rewrites take 1-3 seconds. A
+  rewrite longer than 300 characters, or more than three times the question (minimum 100
+  characters), falls back to the original question.
+- `uv run python -m campus_rag.ask "<question>"` answers from the command line; `--chat` keeps
+  history for follow-ups.
 
 ### 12c. Answer evaluation
 

@@ -16,6 +16,11 @@ Application source code: the `campus_rag` package, managed with uv from the repo
 | `campus_rag/ingest/extract.py` | Turns a policy page's `<main>` element into headed sections of text. |
 | `campus_rag/ingest/chunk.py` | Splits documents into heading-prefixed chunks measured in `cl100k_base` tokens. |
 | `campus_rag/ingest/models.py` | Data types shared by the ingestion stages. |
+| `campus_rag/retrieve/search.py` | `PolicySearcher`: keyword, vector, and hybrid search behind the `Searcher` protocol. |
+| `campus_rag/retrieve/keyword.py`, `vector.py`, `fusion.py`, `sql.py` | BM25 keyword search over `search_tsv`, HNSW and exact vector search, reciprocal rank fusion, and the filter SQL they share. |
+| `campus_rag/retrieve/__main__.py` | The search command: `uv run python -m campus_rag.retrieve "<query>"`. See [evaluate retrieval](../runbooks/evaluate-retrieval.md). |
+| `campus_rag/evaluate/retrieval.py` | Retrieval metrics (recall@k, MRR, latency, HNSW recall) and the `retrieval` evaluation command. |
+| `campus_rag/evaluate/__main__.py` | The evaluation command line: `uv run python -m campus_rag.evaluate <command>`; commands register in one list. |
 
 Tests live in `tests/` at the repository root. Tests marked `db` need the local database; unit
 tests use fakes and need no model server.

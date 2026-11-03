@@ -3,8 +3,8 @@
 campus-rag answers a question in two phases. Offline, it builds a searchable index of public
 documents. Online, it retrieves the most relevant passages and asks an LLM to answer only from them.
 
-Ingestion and the index are built. Retrieval, generation, and the interfaces are planned for
-milestones 6, 7, and 9 of the [MVP plan](plans/mvp.md).
+Ingestion, the index, retrieval, and grounded answers are built. The interfaces are planned for
+milestone 9 of the [MVP plan](plans/mvp.md).
 
 ## Design principles
 
@@ -82,23 +82,59 @@ migrations in [`src/campus_rag/index/migrations/`](../src/campus_rag/index/migra
 
 ### Retrieval
 
-Planned for M6.
+`uv run python -m campus_rag.retrieve "<query>"` prints ranked passages for inspection, and
+`uv run python -m campus_rag.evaluate retrieval` measures them against the golden set; see
+[evaluate retrieval](../runbooks/evaluate-retrieval.md) and the
+[results](results/retrieval.md). The code is in
+[`src/campus_rag/retrieve/`](../src/campus_rag/retrieve/). `PolicySearcher` implements the
+`Searcher` protocol with three modes, and every mode returns up to 50 `RetrievedChunk` rows.
 
-1. **Query rewrite.** Turn a conversational follow-up into a standalone question.
-2. **Hybrid search.** Run keyword and vector searches in parallel and take the top results from each.
-3. **Fusion.** Merge result lists with reciprocal rank fusion (RRF). Keyword search catches exact
-   names, codes, and acronyms; vector search catches paraphrases.
-4. **Metadata filters.** Restrict by source or section when the caller requests it.
-5. **Rerank (optional).** Rescore the fused candidates with a cross-encoder and keep the best few.
+1. **Keyword search.** The question's stemmed words, minus stop words, are joined with OR. Chunks
+   that share any word are ranked by BM25 computed in SQL over `search_tsv`: each word is weighted
+   by how rare it is in the corpus, a heading occurrence counts 2.5 times a body occurrence, and
+   long chunks are normalized (`k1 = 1.2`, `b = 0.75`). PostgreSQL's own `ts_rank_cd` has no
+   inverse document frequency and ranks common words like "university" as highly as rare ones, so
+   it is kept only as a comparison baseline. Questions with no searchable words return nothing.
+2. **Vector search.** The question is embedded with the `search_query: ` prefix and compared with
+   the stored vectors by cosine distance through the partial HNSW index at `hnsw.ef_search = 100`.
+   The score is `1 - distance`. The statement disables sequential scans so the planner uses the
+   index even on a corpus this small. With filters, `hnsw.iterative_scan = relaxed_order` keeps
+   scanning the index until enough rows pass them. An exact scan of the same vectors is the recall
+   baseline for the index.
+3. **Hybrid search.** The top 50 results of each search are merged with reciprocal rank fusion
+   (RRF, `k = 60`). Keyword search catches exact names, codes, and acronyms; vector search catches
+   paraphrases. Each result records its keyword and vector ranks.
+4. **Metadata filters.** A caller can restrict any mode to documents from given sources or whose
+   URL starts with a given prefix. Both searches apply the filter before ranking.
+5. **Rerank.** Not part of the MVP; no local cross-encoder runs without adding PyTorch, and LLM
+   reranking costs about 40 seconds per query on this CPU.
 
 ### Generation
 
-Planned for M7.
+`uv run python -m campus_rag.ask "<question>"` answers from the command line; see
+[ask questions](../runbooks/ask-questions.md). The code is in
+[`src/campus_rag/generate/`](../src/campus_rag/generate/), and the model choices are recorded in
+[decision 12a](plans/mvp-design.md#12a-models).
 
-- The prompt contains instructions, numbered passages with source IDs, and the question.
-- The model must cite passage IDs for each claim and must decline when the passages are insufficient.
-- A deterministic check rejects citations to passages that were not supplied.
-- Only the top passages are included, ordered by relevance, to stay within the context window.
+1. **Rewrite.** A follow-up question is rewritten into a standalone query by `qwen2.5:3b-instruct`,
+   which sees up to three earlier user questions but not the answers. An empty or overlong
+   rewrite, or a failed call, falls back to the question as typed. A first question is never
+   rewritten.
+2. **Retrieve.** Hybrid search returns the top eight chunks.
+3. **Assemble the prompt.** Up to six passages, in rank order, fit a 3,000-token budget counted with
+   `cl100k_base`. A passage that would exceed the budget is skipped and smaller later passages
+   still fit; the top passage is always included, truncated if it alone exceeds the budget. Each
+   passage is numbered `[n]` with its heading path and URL. The instructions require an answer only
+   from the passages, a citation for every claim, under 150 words, and a fixed refusal sentence
+   when the passages lack the answer.
+4. **Generate.** `qwen2.5:7b-instruct` answers at temperature 0 through an OpenAI-compatible
+   `/chat/completions` endpoint, in plain text. The client retries timeouts, connection errors,
+   HTTP 429, and 5xx responses with backoff.
+5. **Check citations.** Code parses `[1]`, `[1, 3]`, `[1][2]`, and `[2-3]` markers, removes numbers
+   that match no supplied passage, and normalizes the rest to `[1][3]`. An answer that starts with
+   the refusal sentence, or has no valid citation left, becomes exactly the refusal sentence, so no
+   uncited claim reaches the user. The returned `Answer` lists the cited passages in order of first
+   use, the removed citation numbers, and per-stage timings.
 
 ### Interfaces
 
