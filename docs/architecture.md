@@ -3,8 +3,7 @@
 campus-rag answers a question in two phases. Offline, it builds a searchable index of public
 documents. Online, it retrieves the most relevant passages and asks an LLM to answer only from them.
 
-Ingestion, the index, retrieval, and grounded answers are built. The interfaces are planned for
-milestone 9 of the [MVP plan](plans/mvp.md).
+Ingestion, the index, retrieval, grounded answers, and the HTTP and MCP interfaces are built.
 
 ## Design principles
 
@@ -138,10 +137,48 @@ migrations in [`src/campus_rag/index/migrations/`](../src/campus_rag/index/migra
 
 ### Interfaces
 
-Planned for M9.
+Two interfaces share one wiring layer, [`services.py`](../src/campus_rag/services.py): each
+request opens its own database connection (no pool is installed, a local connect takes a few
+milliseconds, and a connection per request is correct under FastAPI's worker threads), while the
+embedding and chat clients live for the whole process. Tests replace that layer with fakes. See
+[run the API and MCP server](../runbooks/run-api-and-mcp.md).
 
-- **FastAPI** exposes `search` and `answer` endpoints.
-- **MCP tool** exposes `search` so an agent decides when to retrieve (agentic RAG).
+- **HTTP API.** `uv run python -m campus_rag.api` serves FastAPI on `127.0.0.1:8000` with OpenAPI
+  docs at `/docs`. It refuses a non-loopback host unless `--allow-remote` is passed, because hosting
+  a public service over UW content needs UW's permission ([decision 13](plans/mvp-design.md#13-m9-interfaces)).
+  Code is in [`src/campus_rag/api/`](../src/campus_rag/api/).
+
+  | Route | Purpose |
+  |-------|---------|
+  | `GET /health` | Database reachability and schema version, plus the embedding and chat models. 200 when all work, otherwise 503 with the same body. Model checks are cached for 30 seconds. |
+  | `POST /search` | Ranked passages with scores, keyword and vector ranks, title, heading path, URL, and a 300-character preview. Accepts `mode`, `k`, `sources`, and `url_prefixes`. |
+  | `POST /answer` | A cited answer, its citations, the search query, timings, and, when the answer is a refusal, `suggest_ticket` and a prefilled `ticket_draft`. Accepts conversation `history`. |
+  | `POST /feedback` | A +1 or -1 rating and optional comment for a `request_id`; 201, or 404 for an unknown id. |
+
+  Invalid requests return 422. A database or model-server failure returns 503 with a message that
+  names the fix; an unexpected error returns a generic 500 and logs the trace on the server.
+- **MCP tools.** `uv run python -m campus_rag.mcp_server` runs an MCP server over stdio.
+  `search_policies(query, k=5, mode="hybrid")` returns ranked passages with title, heading path,
+  URL, score, and text, and its description tells the agent to answer only from them and cite the
+  URLs, so the agent decides when to retrieve (agentic RAG). `draft_ticket(question, summary,
+  details, category)` files a help-desk ticket, and its description limits it to questions the
+  search could not answer and to users who agreed. Code is in
+  [`mcp_server.py`](../src/campus_rag/mcp_server.py).
+- **Mock ticketing.** A refused answer carries a ticket draft that code builds from the question,
+  not the LLM, and nothing is filed automatically. `uv run python -m campus_rag.ticketing` serves a
+  loopback-only stand-in for an ITSM system on `127.0.0.1:8001` (`POST /tickets`, `GET /tickets`,
+  `GET /tickets/{id}`, `GET /health`) that stores tickets in `mock_tickets` (migration
+  [`005`](../src/campus_rag/index/migrations/005_mock_tickets.sql)). The MCP tool reaches it
+  through [`TicketingClient`](../src/campus_rag/ticketing/client.py) over HTTP, as it would a real
+  ITSM API; the base URL is `CAMPUS_RAG_TICKETING_BASE_URL`. Code is in
+  [`src/campus_rag/ticketing/`](../src/campus_rag/ticketing/).
+- **Usage analytics.** The API's `search` and `answer` routes and the MCP tools each write one
+  `request_log` row (interface, question, mode, latency by stage, top score, result count, refusal,
+  citation count, models, error). `POST /feedback` writes `answer_feedback`. The tables hold no user
+  identity, and a failed log write never fails the request. `uv run python -m campus_rag.analytics
+  [--days 30]` prints volume, latency percentiles, refusal rate, mean citations, errors, and
+  ratings. Code is in [`src/campus_rag/analytics/`](../src/campus_rag/analytics/); the schema is
+  migration [`004`](../src/campus_rag/index/migrations/004_request_log_and_feedback.sql).
 
 ## Technology choices
 
@@ -154,7 +191,7 @@ Each choice is recorded with its alternatives in the [MVP design decisions](plan
 | Database access | psycopg 3 with plain SQL and numbered migrations | Retrieval queries stay visible and reviewable. |
 | Embeddings | Ollama with `nomic-embed-text` (768 dimensions) in Docker Compose, through an OpenAI-compatible client | Free and local, so no corpus text leaves the machine; another model or provider is a configuration change. |
 | LLM | Chosen in M7: a local Ollama chat model or the Gemini API free tier | See [decision 10g](plans/mvp-design.md#10g-answer-generation-m7). |
-| API | FastAPI (M9) | Simple typed HTTP API with generated OpenAPI documentation. |
+| API | FastAPI | Simple typed HTTP API with generated OpenAPI documentation. |
 | Evaluation | Golden set, deterministic retrieval metrics, and an LLM judge for faithfulness | Separates retrieval failures from generation failures. |
 
 ## Open questions

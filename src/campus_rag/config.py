@@ -40,10 +40,18 @@ class ChatSettings:
 
 
 @dataclass(frozen=True)
+class TicketingSettings:
+    """Where the MCP server files tickets: the base URL of an ITSM-style ticketing API."""
+
+    base_url: str = "http://127.0.0.1:8001"
+
+
+@dataclass(frozen=True)
 class Settings:
     database_url: str
     embedding: EmbeddingSettings = field(default_factory=EmbeddingSettings)
     chat: ChatSettings = field(default_factory=ChatSettings)
+    ticketing: TicketingSettings = field(default_factory=TicketingSettings)
 
 
 def find_repo_root(start: Path | None = None) -> Path | None:
@@ -90,6 +98,11 @@ def load_settings(
         database_url=url,
         embedding=_load_embedding_settings(values),
         chat=_load_chat_settings(values),
+        ticketing=TicketingSettings(
+            base_url=(
+                values.get("CAMPUS_RAG_TICKETING_BASE_URL") or TicketingSettings.base_url
+            ).rstrip("/")
+        ),
     )
 
 

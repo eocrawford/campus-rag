@@ -219,7 +219,7 @@ def test_chat_mode_checks_the_rewrite_model_and_rewrites_follow_ups(harness, cap
         "Which rule applies?",
         "Does rule one apply to staff?",
     ]
-    rewrite_request = harness.chat.calls[1]["messages"][1]["content"]
+    rewrite_request = harness.chat.calls[1]["messages"][-1]["content"]
     assert "Earlier question: Which rule applies?" in rewrite_request
     assert "Follow-up question: And for staff?" in rewrite_request
     out = capsys.readouterr().out

@@ -26,6 +26,11 @@ COMMANDS: tuple[Command, ...] = (
         "recall@k, MRR, latency, and HNSW recall for keyword, vector, and hybrid search",
         "campus_rag.evaluate.retrieval",
     ),
+    Command(
+        "answers",
+        "answer every golden question; refusal, citation, retrieval, faithfulness, and relevance",
+        "campus_rag.evaluate.answers",
+    ),
 )
 
 

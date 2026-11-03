@@ -9,15 +9,44 @@ from campus_rag.generate.models import ChatTurn
 MAX_EARLIER_QUESTIONS = 3
 MAX_QUESTION_CHARS = 400
 MAX_QUERY_CHARS = 300
-MIN_LENGTH_ALLOWANCE = 100  # short follow-ups such as "and for staff?" need room to expand
+MIN_LENGTH_ALLOWANCE = 200  # short follow-ups such as "What about X?" expand to a full question
 
 # Only the user's earlier questions are sent. With the assistant's answers included,
-# qwen2.5:3b-instruct often returned "Does that also apply ...?" unchanged.
+# qwen2.5:3b-instruct often returned "Does that also apply ...?" unchanged. Without examples it
+# also treated elliptical follow-ups ("What about graduate students?") as new topics, so the
+# prompt includes a few worked examples. The examples are invented and deliberately unrelated
+# to the golden set.
 REWRITE_SYSTEM_PROMPT = """\
-You turn a follow-up question into a standalone search question.
-If the follow-up refers to the earlier questions with words like "that", "it", "this", "they", or \
-"and", rewrite it so it names the topic explicitly. If the follow-up asks about a new topic, \
-repeat it exactly. Output only the standalone question."""
+You rewrite the user's latest question so it can be searched on its own.
+A follow-up is often short and leans on the earlier questions: it may use words like "that", \
+"it", "this", or "they", or be an ellipsis such as "What about X?", "And for Y?", or "What if Z?".
+Rewrite a follow-up into one complete question that names the earlier topic and keeps every \
+detail the user just added. If the latest question already makes sense on its own, or starts a \
+new topic, repeat it exactly. Output only the question."""
+
+REWRITE_EXAMPLES: tuple[tuple[tuple[str, ...], str, str], ...] = (
+    (
+        ("How do I renew a library book online?",),
+        "What about overdue fines?",
+        "What are the fines for overdue library books?",
+    ),
+    (
+        ("Can visitors park in campus lots overnight?",),
+        "And for motorcycles?",
+        "Can visitors park motorcycles in campus lots overnight?",
+    ),
+    (
+        ("Can I get a refund on my parking permit if I stop using it?",),
+        "What if I'm stopping because I'm moving out of state?",
+        "Can I get a refund on my parking permit if I stop using it because I'm moving out of "
+        "state?",
+    ),
+    (
+        ("Who can approve a purchase over $10,000?",),
+        "How do I reserve a study room in the library?",
+        "How do I reserve a study room in the library?",
+    ),
+)
 
 _LABEL = re.compile(r"^(?:standalone|rewritten)?\s*(?:question|query)\s*:\s*", re.IGNORECASE)
 
@@ -33,10 +62,11 @@ def rewrite_query(chat: ChatClient, model: str, history: Sequence[ChatTurn], que
     ]
     if not earlier:
         return question
-    messages = [
-        {"role": "system", "content": REWRITE_SYSTEM_PROMPT},
-        {"role": "user", "content": _rewrite_request(earlier, question)},
-    ]
+    messages = [{"role": "system", "content": REWRITE_SYSTEM_PROMPT}]
+    for example_earlier, follow_up, standalone in REWRITE_EXAMPLES:
+        messages.append({"role": "user", "content": _rewrite_request(example_earlier, follow_up)})
+        messages.append({"role": "assistant", "content": standalone})
+    messages.append({"role": "user", "content": _rewrite_request(earlier, question)})
     try:
         result = chat.complete(messages, model=model, temperature=0.0, max_tokens=100)
     except ChatError:
@@ -55,7 +85,7 @@ def _rewrite_request(earlier: Sequence[str], question: str) -> str:
             text = text[:MAX_QUESTION_CHARS].rstrip() + " ..."
         lines.append(f"Earlier question: {text}")
     lines.append(f"Follow-up question: {question.strip()}")
-    return "\n".join(lines) + "\n\nStandalone question:"
+    return "\n".join(lines)
 
 
 def _clean(text: str) -> str:

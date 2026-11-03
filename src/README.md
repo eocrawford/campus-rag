@@ -21,6 +21,12 @@ Application source code: the `campus_rag` package, managed with uv from the repo
 | `campus_rag/retrieve/__main__.py` | The search command: `uv run python -m campus_rag.retrieve "<query>"`. See [evaluate retrieval](../runbooks/evaluate-retrieval.md). |
 | `campus_rag/evaluate/retrieval.py` | Retrieval metrics (recall@k, MRR, latency, HNSW recall) and the `retrieval` evaluation command. |
 | `campus_rag/evaluate/__main__.py` | The evaluation command line: `uv run python -m campus_rag.evaluate <command>`; commands register in one list. |
+| `campus_rag/services.py` | What the API and MCP server share: a per-request database scope, model clients, and health checks. |
+| `campus_rag/api/` | The FastAPI app (`app.py`), its request and response models (`schemas.py`), and the server command: `uv run python -m campus_rag.api`. See [run the API and MCP server](../runbooks/run-api-and-mcp.md). |
+| `campus_rag/mcp_server.py` | The MCP server with the `search_policies` and `draft_ticket` tools: `uv run python -m campus_rag.mcp_server`. |
+| `campus_rag/ticketing/` | The mock ticketing API (`app.py`, `store.py`, `schemas.py`), its HTTP client for the MCP tool (`client.py`), and the server command: `uv run python -m campus_rag.ticketing`. |
+| `campus_rag/loopback.py` | The loopback-only bind rule the API and ticketing servers share. |
+| `campus_rag/analytics/` | Request log and ratings (`log.py`), the usage report (`report.py`), and its command: `uv run python -m campus_rag.analytics`. |
 
 Tests live in `tests/` at the repository root. Tests marked `db` need the local database; unit
 tests use fakes and need no model server.

@@ -7,8 +7,8 @@ the sources do not support one.
 > **Status: early development.** The full question-answering pipeline works locally: 247 UW
 > Policy Directory documents are split into 1,978 chunks, embedded with Ollama, and searched with
 > hybrid keyword (BM25) and vector retrieval; a local LLM answers with validated citations or
-> declines. The API, MCP server, and evaluation write-up are in progress; see
-> [the MVP plan](docs/plans/mvp.md).
+> declines. An HTTP API, an MCP server, usage analytics, and a mock ticketing service work
+> locally; the evaluation write-up is in progress. See [the MVP plan](docs/plans/mvp.md).
 
 ## Why
 

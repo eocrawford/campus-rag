@@ -62,15 +62,28 @@ separately, searched as written, so a later query-rewrite change can show its ga
 
 ## Answer metrics
 
-| Metric | Meaning |
-|--------|---------|
-| **Faithfulness** | Every claim in the answer is supported by a cited passage. |
-| **Answer relevance** | The answer addresses the question asked. |
-| **Citation validity** | Every citation refers to a supplied passage (deterministic check). |
-| **Correct refusal** | Unanswerable questions are declined rather than answered. |
+`uv run python -m campus_rag.evaluate answers` answers every golden question the way the `ask`
+command does (hybrid search, `qwen2.5:7b-instruct`), then scores each answer. Follow-up questions
+are asked with the earlier question and this run's answer to it as history, so the query rewrite
+runs as it does in chat. The committed summary is [results/answers.md](results/answers.md) and the
+procedure is in the [answer evaluation runbook](../runbooks/evaluate-answers.md).
 
-Faithfulness and relevance use an LLM judge. The judge model must differ from the answering model
-to avoid self-grading bias.
+| Metric | Meaning | How it is measured |
+|--------|---------|--------------------|
+| **Refusal accuracy** | Answerable questions are answered and unanswerable questions are refused. | Deterministic. Reported with the false-refusal rate (answerable questions refused) and the false-answer rate (unanswerable questions answered). |
+| **Citation validity** | Every citation refers to a supplied passage. | Deterministic: valid cited numbers / all cited numbers, before the citation check removes the invalid ones. |
+| **Sentence citation coverage** | Every sentence of an answer cites a passage. | Deterministic: answer sentences with at least one `[n]` / all answer sentences. The citation check keeps an answer when at least one sentence cites a passage, so this measures how often a sentence lacks its own. |
+| **Retrieval hit** | The expected passage reached the answer model. | Deterministic: a passage in the prompt matches a golden target. For follow-ups, the same check on a search with the follow-up as asked gives the gain from rewriting. |
+| **Faithfulness** | Every claim in the answer is supported by a passage it cites. | Judge: splits the answer into atomic claims and labels each supported or unsupported, seeing only the passages the answer cites. Score = supported claims / claims. |
+| **Answer relevance** | The answer addresses the question asked. | Judge: a 1-5 rating (5 = directly and completely answers; 1 = off-topic), with the golden reference answer as a hint of what a good answer covers. |
+
+The judge is `llama3.1:8b`, from a different model family than the answer model, to avoid
+self-grading bias. It runs at temperature 0 with a JSON-schema response format. A reply that is
+not valid JSON, or does not match the schema, gets one retry with a repair instruction; a second
+failure is recorded as a judge error for that question and the run continues. Code also counts
+supported claims for which the judge names no passage it was shown, a sign of a misread to check
+by hand. Refusals are not judged. The run also reports the median and p95 time of each stage:
+rewrite, retrieval, generation, and judging.
 
 ## Comparing changes
 

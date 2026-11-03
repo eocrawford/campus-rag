@@ -3,7 +3,7 @@ from pathlib import Path
 
 import pytest
 
-from campus_rag.config import EmbeddingSettings, load_settings
+from campus_rag.config import EmbeddingSettings, TicketingSettings, load_settings
 
 
 def test_defaults(tmp_path: Path) -> None:
@@ -116,3 +116,22 @@ def test_embedding_settings_validate_dimensions_and_hide_key() -> None:
     with pytest.raises(ValueError, match="dimensions"):
         EmbeddingSettings(dimensions=0)
     assert "secret" not in repr(EmbeddingSettings(api_key="secret"))
+
+
+def test_ticketing_base_url_defaults_and_comes_from_env_file_or_environment(
+    tmp_path: Path,
+) -> None:
+    env_file = tmp_path / ".env"
+    assert load_settings(environ={}, env_file=env_file).ticketing == TicketingSettings()
+    assert TicketingSettings().base_url == "http://127.0.0.1:8001"
+
+    env_file.write_text("CAMPUS_RAG_TICKETING_BASE_URL=http://file.test:9001/\n")
+    assert (
+        load_settings(environ={}, env_file=env_file).ticketing.base_url == "http://file.test:9001"
+    )
+    environ = {"CAMPUS_RAG_TICKETING_BASE_URL": "http://env.test:9002"}
+    assert load_settings(environ=environ, env_file=env_file).ticketing.base_url == (
+        "http://env.test:9002"
+    )
+    blank = {"CAMPUS_RAG_TICKETING_BASE_URL": ""}
+    assert load_settings(environ=blank, env_file=None).ticketing == TicketingSettings()

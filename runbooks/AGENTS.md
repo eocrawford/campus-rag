@@ -11,3 +11,9 @@
   - name: evaluate-retrieval
     description: Search the corpus from the command line and measure keyword, vector, and hybrid retrieval (recall@k, MRR, latency, HNSW recall) against the golden set; commands, how to read the tables, and exit codes.
     path: runbooks/evaluate-retrieval.md
+  - name: evaluate-answers
+    description: Answer every golden question and measure refusals, citations, retrieval hits, follow-up rewriting, and judge-graded faithfulness and relevance; commands, duration on CPU, resuming, and how to read the report.
+    path: runbooks/evaluate-answers.md
+  - name: run-api-and-mcp
+    description: Run the HTTP API, the MCP server, and the mock ticketing API; search, ask, rate answers, and file tickets from curl, PowerShell, or an agent; connect an MCP client, read the usage report, and troubleshoot.
+    path: runbooks/run-api-and-mcp.md

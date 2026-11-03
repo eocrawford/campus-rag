@@ -365,25 +365,36 @@ are never silently truncated. Models are configuration (`CAMPUS_RAG_CHAT_*`).
   plain text cited 5 of 5 sentences; a JSON schema (`answer`, `refused`) cited 5 of 7, produced
   longer answers, and added about 51 prompt tokens. Both refused the unanswerable question.
 - **Follow-up rewriting** sends only the earlier user questions, not the assistant's answers. With
-  answers included, the 3B model returned follow-ups unchanged; without them it resolved all four
-  test cases, including leaving a new-topic question as typed. Rewrites take 1-3 seconds. A
-  rewrite longer than 300 characters, or more than three times the question (minimum 100
+  answers included, the 3B model returned follow-ups unchanged. The first prompt also treated
+  elliptical follow-ups ("What about graduate students?") as new topics; the M8 subset run exposed
+  this on golden question q005. The prompt now names that pattern and includes four worked
+  examples written for the prompt and unrelated to the golden set (three follow-ups and one new
+  topic). All four golden follow-ups then resolved and new-topic controls stayed unchanged; because
+  the golden set revealed the problem, the M8 report discloses it. Rewrites take 1-3 seconds. A
+  rewrite longer than 300 characters, or more than three times the question (minimum 200
   characters), falls back to the original question.
 - `uv run python -m campus_rag.ask "<question>"` answers from the command line; `--chat` keeps
   history for follow-ups.
 
 ### 12c. Answer evaluation
 
-`uv run python -m campus_rag.evaluate answers` answers every golden question and reports:
+`uv run python -m campus_rag.evaluate answers` answers every golden question with production
+settings (hybrid search). Follow-ups are asked with the earlier question and this run's answer as
+history, so rewriting is exercised. It reports:
 
 | Metric | Method |
 |--------|--------|
-| Faithfulness | Judge splits the answer into claims and marks each supported or not by the cited passages; score = supported / total. |
-| Answer relevance | Judge rates 1-5 whether the answer addresses the question. |
+| Faithfulness | Judge (`llama3.1:8b`, JSON schema output) splits the answer into claims and marks each supported or not by the passages the answer cited; score = supported / total. A claim credited to a passage the judge was not shown is counted separately. |
+| Answer relevance | Judge rates 1-5 whether the answer addresses the question, with the golden reference answer as a guide. |
 | Citation validity | Deterministic: share of cited numbers that were supplied. |
-| Correct refusal | Deterministic: unanswerable questions refused; answerable questions answered. |
+| Sentence citation coverage | Deterministic: share of answer sentences with at least one citation. |
+| Correct refusal | Deterministic: refusal accuracy, false refusals (answerable refused), and false answers (unanswerable answered). |
+| Retrieval hit | Deterministic: a passage given to the model matches a golden target; follow-ups also compare the rewritten query with the raw follow-up. |
 
-Raw results go to `eval-results/`; `--write-report` writes `docs/results/answers.md`.
+Results are written after every question so `--resume` can continue an interrupted run. Raw
+results go to `eval-results/`; `--write-report` writes `docs/results/answers.md`. A single judge
+model from a different family is a known limit: in the subset run it was sometimes lenient and its
+claim splits were not always atomic.
 
 ## 13. M9 interfaces
 
