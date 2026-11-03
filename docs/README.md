@@ -9,6 +9,7 @@
 ## Plans
 
 - [MVP plan](plans/mvp.md) - milestones and current status.
+- [MVP design decisions](plans/mvp-design.md) - options, recommendations, and decision status.
 
 ## Contributing
 
