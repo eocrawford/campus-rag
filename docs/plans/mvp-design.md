@@ -19,6 +19,7 @@ options considered, the choice, and its status.
 | 12 | M7-M8 answers and answer evaluation | `qwen2.5:7b-instruct` answers through Ollama; `qwen2.5:3b-instruct` rewrites follow-ups; deterministic citation checks and refusals; `llama3.1:8b` judges | Decided 2026-11-03 (maintainer-delegated) |
 | 13 | M9 interfaces | FastAPI on loopback (`/search`, `/answer`, `/health`); MCP server over stdio with a `search_policies` tool | Decided 2026-11-03 (maintainer-delegated) |
 | 14 | M11-M12 analytics and mock ticketing | Local request log and feedback tables with a usage report; a loopback mock ticketing API and an MCP `draft_ticket` tool | Decided 2026-11-03 (maintainer-delegated) |
+| 15 | Embedding strategy experiment | Compare heading prefix, task prefixes, a second model (`bge-m3`), and reduced dimensions on the golden set with exact search; production index unchanged | Decided 2026-11-03 |
 
 ## 1. Model provider
 
@@ -403,3 +404,38 @@ Raw results go to `eval-results/`; `--write-report` writes `docs/results/answers
   (`uv run python -m campus_rag.ticketing`, port 8001) creates and lists tickets, and the MCP server
   adds a `draft_ticket` tool. When an answer is refused, the API response suggests drafting a
   ticket; the agent or user decides whether to file it.
+
+## 15. Embedding strategy experiment
+
+Approved by the maintainer on 2026-11-03. The experiment measures how much each embedding choice
+in decision 10 contributes, using the golden set, so the choices rest on evidence from this corpus
+rather than published benchmarks.
+
+### 15a. Variants
+
+| Variant | Model | Text embedded | Task prefixes | Dimensions |
+|---------|-------|---------------|---------------|------------|
+| `baseline` (production) | `nomic-embed-text` | Heading path + body | Yes | 768 |
+| `no-heading` | `nomic-embed-text` | Body only | Yes | 768 |
+| `no-task-prefix` | `nomic-embed-text` | Heading path + body | No | 768 |
+| `bge-m3` | `bge-m3` | Heading path + body | None (model uses none) | 1,024 |
+| `nomic-256` | `nomic-embed-text` | Heading path + body | Yes | First 256 of 768, renormalized; only if the served model is Matryoshka-trained (v1.5) |
+
+### 15b. Method
+
+- Experiment vectors live in `chunk_embeddings` under model keys `experiment:<variant>`, so no
+  schema change is needed and production queries, which filter on `nomic-embed-text`, are
+  unaffected. `--drop` removes them.
+- Retrieval uses exact cosine search (1,978 chunks, about 16 ms) so index approximation does not
+  blur the comparison.
+- For each variant: vector-only and hybrid recall@1/5/10 and MRR@10, overall and per question type,
+  plus embedding time.
+- Command: `uv run python -m campus_rag.evaluate embeddings [--variants ...] [--write-report]`, a
+  subcommand of the existing evaluate command. `--write-report` writes
+  `docs/results/embedding-strategies.md`.
+- Runs after the full answer evaluation (M8) so the two do not compete for the CPU.
+
+### 15c. Limits
+
+With 36 answerable standalone questions, one question moves recall by about 0.03, so differences
+under 0.06 are not meaningful. The report states this.
