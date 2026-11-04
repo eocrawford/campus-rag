@@ -86,7 +86,7 @@ Each follow-up is rewritten by `qwen2.5:3b-instruct` into a standalone question 
 earlier questions, for example `Does that also apply to graduate teaching assistants?` becomes a
 question that names the topic of the earlier question. A follow-up on a new topic stays as typed.
 The rewritten question drives retrieval and the answer, and is printed as `Search query:` above the
-answer. The rewrite adds about 1 to 3 seconds. When the rewrite fails or returns an empty or
+answer. The rewrite adds about 1 to 3 seconds on an otherwise idle machine, and more when other models are busy. When the rewrite fails or returns an empty or
 overlong reply, the command uses the follow-up as typed.
 
 ## Exit codes

@@ -16,6 +16,10 @@ documents with citations, and demonstrates measurable gains from hybrid retrieva
 | 7 | Grounded answers | Answers cite passages, citations are validated, and unsupported questions are declined | Done ([ask runbook](../../runbooks/ask-questions.md)) |
 | 8 | Answer evaluation | Faithfulness, relevance, and refusal metrics reported with an independent judge | Done: faithfulness 0.94, refusal accuracy 0.98, citation validity 1.00 ([results](../results/answers.md)) |
 | 9 | Interfaces | FastAPI `search` and `answer` endpoints; MCP `search` tool | Done: API, `search_policies` MCP tool ([runbook](../../runbooks/run-api-and-mcp.md), [decision 13](mvp-design.md#13-m9-interfaces)) |
-| 10 | Write-up | README results table and a short case study of findings | Not started |
+| 10 | Write-up | README results table and a short case study of findings | Done: [README results](../../README.md#results), [case study](../case-study.md) |
 | 11 | Usage analytics and feedback | Each request logs latency, retrieval scores, and outcome; users can rate answers; a report summarizes usage and ratings | Done: `request_log`, `POST /feedback`, usage report ([runbook](../../runbooks/run-api-and-mcp.md#read-the-usage-report), [decision 14](mvp-design.md#14-m11-m12-analytics-and-mock-ticketing)) |
 | 12 | Mock ticketing tool (stretch) | When the corpus cannot answer, an MCP tool drafts a help-desk ticket in a local mock ticketing API | Done: `draft_ticket` MCP tool and mock ticketing API ([runbook](../../runbooks/run-api-and-mcp.md#file-a-help-desk-ticket), [decision 14](mvp-design.md#14-m11-m12-analytics-and-mock-ticketing)) |
+
+After M8, the embedding strategy experiment
+([decision 15](mvp-design.md#15-embedding-strategy-experiment)) measured each embedding choice on
+the golden set: [embedding strategy results](../results/embedding-strategies.md).

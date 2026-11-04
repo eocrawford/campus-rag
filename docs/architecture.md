@@ -3,7 +3,9 @@
 campus-rag answers a question in two phases. Offline, it builds a searchable index of public
 documents. Online, it retrieves the most relevant passages and asks an LLM to answer only from them.
 
-Ingestion, the index, retrieval, grounded answers, and the HTTP and MCP interfaces are built.
+Every component below is built: ingestion, the index, retrieval, grounded answers, evaluation, the
+HTTP and MCP interfaces, usage analytics, and mock ticketing. The [case study](case-study.md)
+summarizes the decisions and their measured results.
 
 ## Design principles
 
@@ -209,7 +211,9 @@ migrations in [`src/campus_rag/index/migrations/`](../src/campus_rag/index/migra
   `/embeddings` endpoint, by default Ollama serving `nomic-embed-text` on this machine. Chunks are
   sent with the `search_document: ` prefix and questions with `search_query: `. Several models can
   coexist for comparison; a stored `content_hash` that differs from the chunk's marks the
-  embedding as stale.
+  embedding as stale. The [embedding strategy experiment](results/embedding-strategies.md) found
+  that the task prefixes matter, while dropping the heading path, switching to `bge-m3`, or
+  truncating to 256 dimensions changes recall by less than the report's noise threshold.
 
 ### Retrieval
 
@@ -322,12 +326,12 @@ Each choice is recorded with its alternatives in the [MVP design decisions](plan
 | Store | PostgreSQL 17 + pgvector in Docker Compose | Vectors, keyword search, and metadata in one database with SQL filtering. |
 | Database access | psycopg 3 with plain SQL and numbered migrations | Retrieval queries stay visible and reviewable. |
 | Embeddings | Ollama with `nomic-embed-text` (768 dimensions) in Docker Compose, through an OpenAI-compatible client | Free and local, so no corpus text leaves the machine; another model or provider is a configuration change. |
-| LLM | Chosen in M7: a local Ollama chat model or the Gemini API free tier | See [decision 10g](plans/mvp-design.md#10g-answer-generation-m7). |
+| LLM | Ollama: `qwen2.5:7b-instruct` answers, `qwen2.5:3b-instruct` rewrites follow-ups, `llama3.1:8b` judges | Free and local; the 7B model cited passages reliably where the 3B models tried did not. See [decision 12a](plans/mvp-design.md#12a-models). |
 | API | FastAPI | Simple typed HTTP API with generated OpenAPI documentation. |
-| Evaluation | Golden set, deterministic retrieval metrics, and an LLM judge for faithfulness | Separates retrieval failures from generation failures. |
+| Evaluation | Golden set, deterministic retrieval and citation metrics, and an LLM judge for faithfulness and relevance | Separates retrieval failures from generation failures. |
 
 ## Open questions
 
-- Which embedding model gives the best recall@5 on the golden set for its cost?
 - Does reranking improve answer faithfulness enough to justify its latency?
 - What chunk size and overlap work best for policy documents with long numbered sections?
+- How closely do the LLM judge's faithfulness and relevance scores agree with human grading?

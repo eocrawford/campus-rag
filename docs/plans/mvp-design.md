@@ -24,8 +24,8 @@ options considered, the choice, and its status.
 ## 1. Model provider
 
 **Status:** superseded by [decision 10](#10-m4-index-embeddings-and-keyword-search), which
-chooses local embeddings with Ollama. The answer-generation model is chosen in M7
-([10g](#10g-answer-generation-m7)).
+chooses local embeddings with Ollama. [Decision 12a](#12a-models) chooses the answer-generation
+model.
 
 Model calls use the OpenAI-compatible API shape, so the provider is a configuration value (base
 URL, API key, model name) rather than code.
@@ -69,13 +69,18 @@ stays local and the golden set is written in original words.
 ```text
 src/campus_rag/
   config.py        settings from environment variables
-  ingest/          fetch, extract, chunk
-  index/           database access, embedding
-  retrieve/        keyword, vector, fusion
-  generate/        prompt assembly, answer, citation checks
-  evaluate/        golden set, retrieval and answer metrics
-  api.py           FastAPI service
-  mcp_server.py    MCP search tool
+  ingest/          select, fetch, extract, chunk, store, and the embedding stage
+  index/           migrations, database writes, embedding client
+  retrieve/        keyword, vector, fusion, search command
+  generate/        prompt assembly, chat client, query rewrite, answer, citation checks
+  evaluate/        golden set, retrieval, answer, and embedding evaluations, judge
+  ask.py           question-answering command
+  services.py      wiring shared by the API and the MCP server
+  api/             FastAPI service
+  mcp_server.py    MCP tools: search_policies, draft_ticket
+  analytics/       request log, ratings, usage report
+  ticketing/       mock ticketing API and its client
+  loopback.py      loopback-only bind rule
 ```
 
 ## 6. Test strategy
@@ -223,7 +228,7 @@ embedding model must accept chunks up to 800 tokens without truncation.
 | Option | Cost | Tradeoffs |
 |--------|------|-----------|
 | **Ollama with `nomic-embed-text`** (768 dimensions) | Free | Local and private; small and fast on CPU. Ollama loads it with a 2,048-token context; the longest chunk measures 796 of its tokens, so every chunk fits with room to spare. Needs task prefixes (`search_document: ` for chunks, `search_query: ` for questions). |
-| Ollama with `bge-m3` (1,024 dimensions) | Free | Strong and multilingual, but larger and slower on CPU. A good second model for comparison in M6. |
+| Ollama with `bge-m3` (1,024 dimensions) | Free | Strong and multilingual, but larger and slower on CPU. Compared in [decision 15](#15-embedding-strategy-experiment). |
 | Ollama with `mxbai-embed-large` (1,024 dimensions) | Free | Strong on benchmarks, but its 512-token context would truncate longer chunks. |
 | OpenAI `text-embedding-3-small` (1,536 dimensions) | About $0.01 per full embed, with a $5 minimum prepaid credit | Highest convenience and quality per dollar; requires a paid account. |
 | Google Gemini free tier | Free within limits | Free-tier prompts may be used to improve Google products. |
@@ -281,8 +286,9 @@ against an exact scan (see the [retrieval results](../results/retrieval.md)).
 
 ### 10g. Answer generation (M7)
 
-The chat model for grounded answers is decided in M7. Candidates are a local Ollama model (free,
-about 15-40 seconds per answer on this CPU) and the Gemini API free tier.
+Decided in [12a](#12a-models): `qwen2.5:7b-instruct` through Ollama. The candidates were a local
+Ollama model and the Gemini API free tier, whose free-tier prompts may be used to improve Google
+products.
 
 ## Maintainer-delegated decisions
 
@@ -370,7 +376,7 @@ are never silently truncated. Models are configuration (`CAMPUS_RAG_CHAT_*`).
   this on golden question q005. The prompt now names that pattern and includes four worked
   examples written for the prompt and unrelated to the golden set (three follow-ups and one new
   topic). All four golden follow-ups then resolved and new-topic controls stayed unchanged; because
-  the golden set revealed the problem, the M8 report discloses it. Rewrites take 1-3 seconds. A
+  the golden set revealed the problem, the M8 report discloses it. Rewrites take 1-3 seconds when the model is loaded and the CPU is otherwise idle; during the answer evaluation, which also ran the answer and judge models, the median was 17 seconds. A
   rewrite longer than 300 characters, or more than three times the question (minimum 200
   characters), falls back to the original question.
 - `uv run python -m campus_rag.ask "<question>"` answers from the command line; `--chat` keeps
@@ -456,7 +462,8 @@ under 0.06 are not meaningful. The report states this.
 [Results](../results/embedding-strategies.md): the task prefixes are the only choice whose effect
 exceeds the noise threshold. Without them, vector recall@1 falls from 0.86 to 0.72 and MRR@10 from
 0.91 to 0.84. Removing the heading prefix, switching to `bge-m3`, or truncating to 256 dimensions
-changes results by one question or less; `bge-m3` takes 2.4 times as long to embed the corpus.
+changes overall recall by at most two questions (0.056), under the threshold; `bge-m3` takes 2.4 times
+as long to embed the corpus.
 Hybrid search hides every difference (recall@1 0.69 and recall@5 0.97-1.00 for all variants).
 Production keeps `nomic-embed-text` at 768 dimensions with prefixes. `nomic-256` is a measured
 option if storage ever matters: one third of the vector size with no measurable loss here.

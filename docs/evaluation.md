@@ -1,9 +1,9 @@
 # Evaluation
 
 Evaluation separates two questions: did retrieval find the right passages, and did the answer
-stay faithful to them? Measuring them separately shows where a failure comes from.
-The golden set arrives in M5, retrieval metrics in M6, and answer metrics in M8 of the
-[MVP plan](plans/mvp.md).
+stay faithful to them? Measuring them separately shows where a failure comes from. The committed
+results are [retrieval](results/retrieval.md), [answers](results/answers.md), and
+[embedding strategies](results/embedding-strategies.md).
 
 ## Golden set
 
@@ -58,7 +58,12 @@ These metrics are deterministic and cost nothing beyond embedding the questions.
 search, overall and by question type, with latency and the HNSW index's recall against an exact
 scan; the committed summary is [results/retrieval.md](results/retrieval.md) and the procedure is
 in the [retrieval runbook](../runbooks/evaluate-retrieval.md). Follow-up questions are scored
-separately, searched as written, so a later query-rewrite change can show its gain.
+separately, searched as written, as the baseline for the gain from query rewriting.
+
+`uv run python -m campus_rag.evaluate embeddings` uses the same metrics to compare embedding
+choices (heading path, task prefixes, a second model, and reduced dimensions) with exact search;
+see [decision 15](plans/mvp-design.md#15-embedding-strategy-experiment) and the
+[results](results/embedding-strategies.md).
 
 ## Answer metrics
 
@@ -87,5 +92,7 @@ rewrite, retrieval, generation, and judging.
 
 ## Comparing changes
 
-Every retrieval or prompt change reports a before/after table in its pull request. The first
-planned comparison is keyword-only versus vector-only versus hybrid retrieval at recall@5.
+Every retrieval or prompt change reports a before/after table in its pull request. The
+[retrieval results](results/retrieval.md) compare keyword, vector, and hybrid search, and BM25
+keyword ranking with `ts_rank_cd`. With 36 scored questions, one question moves recall by about
+0.028, so treat differences under 0.06 as noise.

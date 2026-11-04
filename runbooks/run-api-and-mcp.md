@@ -37,6 +37,10 @@ any host except `localhost` and loopback addresses, because hosting a public ser
 content needs UW's permission. `--allow-remote` is for a host you control and have that permission
 for.
 
+The command exits `2` with a usage message for an invalid option or a refused host, and `5` when a
+setting in `.env` is invalid. The ticketing server uses the same codes, and the MCP server exits `5`
+for an invalid setting.
+
 To run it in the background and stop it later, keep the process id that `Start-Process` returns.
 `uv run` starts the server as a child process, so stop the Python process too:
 
@@ -58,8 +62,8 @@ Invoke-RestMethod http://127.0.0.1:8000/health
 ```
 
 ```json
-{"status": "ok", "schema_version": 4,
- "database": {"ok": true, "detail": "schema version 4"},
+{"status": "ok", "schema_version": 5,
+ "database": {"ok": true, "detail": "schema version 5"},
  "embedding": {"ok": true, "detail": "model nomic-embed-text answers"},
  "chat": {"ok": true, "detail": "model qwen2.5:7b-instruct is available"}}
 ```

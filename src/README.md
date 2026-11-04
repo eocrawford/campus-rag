@@ -5,7 +5,7 @@ Application source code: the `campus_rag` package, managed with uv from the repo
 
 | Module | Responsibility |
 |--------|----------------|
-| `campus_rag/config.py` | Settings from environment variables and the repo-root `.env`: database URL and embedding settings. |
+| `campus_rag/config.py` | Settings from environment variables and the repo-root `.env`: database URL, embedding, chat model, and ticketing settings. |
 | `campus_rag/index/migrate.py` | Applies the numbered SQL files in `campus_rag/index/migrations/`: `uv run python -m campus_rag.index.migrate`. |
 | `campus_rag/index/store.py` | Writes documents, chunks, and embeddings to PostgreSQL idempotently, and finds chunks that need embedding. |
 | `campus_rag/index/embed.py` | Embedding client for an OpenAI-compatible `/embeddings` API (Ollama by default), with task prefixes, batching, and retries. |
@@ -18,8 +18,15 @@ Application source code: the `campus_rag` package, managed with uv from the repo
 | `campus_rag/ingest/models.py` | Data types shared by the ingestion stages. |
 | `campus_rag/retrieve/search.py` | `PolicySearcher`: keyword, vector, and hybrid search behind the `Searcher` protocol. |
 | `campus_rag/retrieve/keyword.py`, `vector.py`, `fusion.py`, `sql.py` | BM25 keyword search over `search_tsv`, HNSW and exact vector search, reciprocal rank fusion, and the filter SQL they share. |
+| `campus_rag/retrieve/connect.py`, `models.py` | Opening the database with a schema check and the exit codes the commands share; the `RetrievedChunk` result type. |
 | `campus_rag/retrieve/__main__.py` | The search command: `uv run python -m campus_rag.retrieve "<query>"`. See [evaluate retrieval](../runbooks/evaluate-retrieval.md). |
+| `campus_rag/generate/answer.py` | `AnswerService`: rewrite a follow-up, retrieve, build the prompt, generate, and check citations. |
+| `campus_rag/generate/prompt.py`, `citations.py`, `rewrite.py`, `chat.py`, `models.py` | Prompt assembly within the token budget, citation checks and refusals, follow-up rewriting, the OpenAI-compatible chat client, and the `Answer` types. |
+| `campus_rag/ask.py` | The question-answering command: `uv run python -m campus_rag.ask "<question>"`. See [ask questions](../runbooks/ask-questions.md). |
+| `campus_rag/evaluate/golden.py` | Loads and validates the golden set, and matches retrieved chunks to its targets. |
 | `campus_rag/evaluate/retrieval.py` | Retrieval metrics (recall@k, MRR, latency, HNSW recall) and the `retrieval` evaluation command. |
+| `campus_rag/evaluate/answers.py`, `judge.py` | The `answers` evaluation command: deterministic refusal, citation, and retrieval metrics, and the LLM judge for faithfulness and relevance. See [evaluate answers](../runbooks/evaluate-answers.md). |
+| `campus_rag/evaluate/embeddings.py` | The `embeddings` evaluation command: compares embedding strategies with exact search. See [compare embedding strategies](../runbooks/evaluate-retrieval.md#compare-embedding-strategies). |
 | `campus_rag/evaluate/__main__.py` | The evaluation command line: `uv run python -m campus_rag.evaluate <command>`; commands register in one list. |
 | `campus_rag/services.py` | What the API and MCP server share: a per-request database scope, model clients, and health checks. |
 | `campus_rag/api/` | The FastAPI app (`app.py`), its request and response models (`schemas.py`), and the server command: `uv run python -m campus_rag.api`. See [run the API and MCP server](../runbooks/run-api-and-mcp.md). |
