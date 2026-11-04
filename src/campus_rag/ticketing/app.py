@@ -1,4 +1,4 @@
-"""A mock ITSM ticketing API: file, list, and read help-desk tickets.
+"""A mock IT service management (ITSM) ticketing API: file, list, and read help-desk tickets.
 
 It stands in for a system such as ServiceNow so the MCP `draft_ticket` tool integrates over HTTP,
 the way it would with a real one. It has no authentication, so it binds to loopback only.
@@ -47,7 +47,10 @@ def create_app(connect: Callable[[], psycopg.Connection] | None = None) -> FastA
     app = FastAPI(
         title="campus-rag mock ticketing",
         version="0.1.0",
-        description="A local stand-in for an ITSM system. Tickets are stored in `mock_tickets`.",
+        description=(
+            "A local stand-in for an IT service management (ITSM) system. "
+            "Tickets are stored in `mock_tickets`."
+        ),
     )
 
     @app.exception_handler(psycopg.Error)

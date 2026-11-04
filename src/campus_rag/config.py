@@ -41,7 +41,10 @@ class ChatSettings:
 
 @dataclass(frozen=True)
 class TicketingSettings:
-    """Where the MCP server files tickets: the base URL of an ITSM-style ticketing API."""
+    """Where the MCP server files tickets.
+
+    The base URL of an IT service management (ITSM) ticketing API.
+    """
 
     base_url: str = "http://127.0.0.1:8001"
 

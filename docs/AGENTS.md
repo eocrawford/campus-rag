@@ -3,6 +3,7 @@
 | Topic | Guidance |
 |-------|----------|
 | Case study: problem, key decisions with measured results, limits, and next steps | [`docs/case-study.md`](case-study.md) |
+| Walkthrough: run the system end to end, then a code tour in question-flow order | [`docs/walkthrough.md`](walkthrough.md) |
 | Architecture, diagrams, request flow, and design tradeoffs | [`docs/architecture.md`](architecture.md) |
 | Diagrams: Mermaid sources with rendered PNG and SVG copies (system overview, answering a question); each source must match its copy in `architecture.md` | [`docs/images/`](images/) |
 | Evaluation method, golden set, and metrics | [`docs/evaluation.md`](evaluation.md) |

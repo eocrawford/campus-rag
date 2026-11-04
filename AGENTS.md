@@ -68,6 +68,15 @@ uv run pytest
 ```
 
 Never run `uv lock` with a package mirror configured; `uv.lock` must keep its canonical PyPI URLs.
+On a network that needs a mirror, use `scripts/update-lock-via-mirror.ps1`; see
+[update dependencies](runbooks/update-dependencies.md).
+
+Check documentation links (relative links, anchors, and pinned code permalinks) after changing docs
+or moving code that docs link to:
+
+```powershell
+uv run python scripts/verify_glossary.py
+```
 
 ## Commit trailer
 

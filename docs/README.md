@@ -2,6 +2,7 @@
 
 ## Start here
 
+- [Walkthrough](walkthrough.md) - run the whole system, then read the code in the order a question flows through it.
 - [Case study](case-study.md) - the problem, key decisions with their measured results, limits, and next steps.
 - [Architecture](architecture.md) - components, diagrams, request flow, and design tradeoffs.
 - [Evaluation](evaluation.md) - golden question set, retrieval and answer metrics, and how to compare changes.

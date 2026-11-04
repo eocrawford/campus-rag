@@ -98,6 +98,8 @@ uv run python -m campus_rag.evaluate retrieval
 
 ## Documentation
 
+- [Walkthrough](docs/walkthrough.md): run the whole system, then read the code in the order a question flows
+- [Run the demo](runbooks/run-demo.md): set up a clean machine and demo every part, step by step
 - [Case study](docs/case-study.md): decisions, evidence, and limits
 - [Documentation index](docs/README.md): architecture, evaluation and results, data sources, glossary, and plans
 - [Runbooks](runbooks/AGENTS.md)

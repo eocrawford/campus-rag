@@ -302,7 +302,7 @@ embedding and chat clients live for the whole process. Tests replace that layer 
   [`mcp_server.py`](../src/campus_rag/mcp_server.py).
 - **Mock ticketing.** A refused answer carries a ticket draft that code builds from the question,
   not the LLM, and nothing is filed automatically. `uv run python -m campus_rag.ticketing` serves a
-  loopback-only stand-in for an ITSM system on `127.0.0.1:8001` (`POST /tickets`, `GET /tickets`,
+  loopback-only stand-in for an IT service management (ITSM) system on `127.0.0.1:8001` (`POST /tickets`, `GET /tickets`,
   `GET /tickets/{id}`, `GET /health`) that stores tickets in `mock_tickets` (migration
   [`005`](../src/campus_rag/index/migrations/005_mock_tickets.sql)). The MCP tool reaches it
   through [`TicketingClient`](../src/campus_rag/ticketing/client.py) over HTTP, as it would a real

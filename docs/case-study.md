@@ -109,7 +109,7 @@ fault and measures the fix.
 
 **Decision:** expose search to AI agents as an MCP tool, `search_policies`, so the agent decides
 when and what to search, and add a `draft_ticket` tool that files a help-desk ticket in a local
-mock ITSM API over HTTP ([decision 14](plans/mvp-design.md#14-m11-m12-analytics-and-mock-ticketing),
+mock IT service management (ITSM) API over HTTP ([decision 14](plans/mvp-design.md#14-m11-m12-analytics-and-mock-ticketing),
 [`mcp_server.py`](../src/campus_rag/mcp_server.py)). **Alternative:** a fixed retrieve-then-answer
 endpoint only.
 

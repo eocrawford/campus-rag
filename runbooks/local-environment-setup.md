@@ -123,7 +123,8 @@ It then runs `uv sync --locked --offline` to confirm that the environment matche
 stays unchanged and keeps its PyPI URLs. Credentials in the mirror URL are never printed.
 
 After setup, `uv run` commands need no network access, because the environment already matches
-`uv.lock`. Rerun the script with `-PackageIndexUrl` after `uv.lock` changes.
+`uv.lock`. Rerun the script with `-PackageIndexUrl` after `uv.lock` changes. To change
+dependencies on such a network, follow [update dependencies](update-dependencies.md).
 
 ## Verify
 
@@ -163,7 +164,7 @@ Each failure prints `FAILED at step N (<step>): <reason>` and a `Fix:` line. Com
 | `FAILED at step 3 (Environment file): CAMPUS_RAG_EMBEDDING_DIMENSIONS is` | The dimensions value is not a positive whole number. | Set `CAMPUS_RAG_EMBEDDING_DIMENSIONS=768` in `.env`. |
 | `FAILED at step 3 (Environment file): CAMPUS_RAG_CHAT_BASE_URL is` | The chat base URL is not an `http` or `https` URL. | Set `CAMPUS_RAG_CHAT_BASE_URL=http://127.0.0.1:11434/v1` in `.env`. |
 | `FAILED at step 3 (Environment file): CAMPUS_RAG_CHAT_TIMEOUT_SECONDS is` | The timeout is not a positive number. | Set `CAMPUS_RAG_CHAT_TIMEOUT_SECONDS=300` in `.env`. |
-| `FAILED at step 4 (Python environment): uv.lock is out of date` | `pyproject.toml` changed without updating `uv.lock`. | `uv lock` on a network that can reach PyPI, rerun, and commit the updated `uv.lock`. |
+| `FAILED at step 4 (Python environment): uv.lock is out of date` | `pyproject.toml` changed without updating `uv.lock`. | Follow [update dependencies](update-dependencies.md), rerun, and commit the updated `uv.lock`. |
 | `FAILED at step 4 (Python environment): cannot download packages from files.pythonhosted.org` | The network blocks PyPI's file host, or the machine is offline. | Rerun with `-PackageIndexUrl <your package mirror URL>`. See [Restricted networks](#restricted-networks). |
 | `FAILED at step 4 (Python environment): the mirror served files whose hashes differ from uv.lock.` | The mirror serves modified or rebuilt files. | Use a mirror that serves the original PyPI files. |
 | `FAILED at step 4 (Python environment): cannot download packages from the mirror` | The mirror URL is wrong, unreachable, or needs credentials. | Check the URL with `pip config list` or your mirror's documentation, then rerun. |
